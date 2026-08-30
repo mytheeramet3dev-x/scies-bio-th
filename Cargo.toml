@@ -1,0 +1,24 @@
+[package]
+name = "scies-bio-th"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A high-performance, dependency-free bioinformatics toolkit for Rust."
+repository = "https://github.com/mytheeramet3dev-x/scies-bio-th"
+
+[dependencies]
+scies-math = { version = "0.2", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+parallel = []
+interop = ["dep:scies-math"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "align_bench"
+harness = false
