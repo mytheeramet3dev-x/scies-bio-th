@@ -11,9 +11,9 @@
 
 ```text
 scies_bio_th::
-├── seq            — DNA, RNA, and Protein validated sequence primitives
+├── seq            — DNA, RNA, and Protein validated sequence primitives & K-mers
 ├── align          — Local (Smith-Waterman), Global (Needleman-Wunsch), Levenshtein & Hamming distances
-├── codon          — Universal genetic code translation and open reading frame (ORF) finder
+├── codon          — Universal genetic code translation, ORF & genomic region finder
 ├── edit           — CRISPR-Cas9/Cas12a PAM discovery, sgRNA design, CFD off-target scoring, and PCR primer design
 ├── ivg            — In Vitro Gametogenesis (IVG), Epigenetic reprogramming, SCNT cloning, Zona Pellucida & Artificial Womb
 ├── vaccine        — Personalized cancer neoantigen identification, HLA/MHC Class I binding prediction, and mRNA vaccine design
@@ -22,7 +22,13 @@ scies_bio_th::
 ├── genome         — Genomic intervals and Interval Tree coordinate lookup
 ├── variant        — VCF parsing and genomic variation models (SNP, INDEL)
 ├── annotation     — GFF3 genomic feature parsing
-└── io             — Zero-copy FASTA, FASTQ, GFF3, and VCF streaming readers
+├── io             — Zero-copy FASTA, FASTQ, GFF3, and VCF streaming readers
+├── phylo          — Phylogenetic distance matrices, UPGMA tree clustering, and Newick tree export
+├── popgen         — Allele & genotype frequencies, Heterozygosity, and Chi-square Hardy-Weinberg testing
+├── genomics       — K-mer spectrum counting and De Bruijn Graph unitig sequence assembly
+├── transcriptomics— Expression normalization: Transcripts Per Million (TPM), RPKM, and CPM
+├── proteomics     — In silico proteolytic cleavage (Trypsin, Chymotrypsin, LysC), monoisotopic mass & pI
+└── metagenomics   — Alpha diversity metrics: Shannon-Wiener index, Simpson, Evenness, and Chao1
 ```
 
 ---
@@ -82,11 +88,40 @@ println!("Codon-optimized GC%: {:.2}%", vaccine.orf_gc_content);
 println!("mRNA Length: {} nt", vaccine.total_length_nt);
 ```
 
+### 4. Phylogenetics & Newick Tree Export
+```rust
+use scies_bio_th::phylo::{DistanceMatrix, upgma};
+
+let names = vec!["Human".into(), "Chimp".into(), "Gorilla".into()];
+let mat = vec![
+    0.0, 1.6, 2.4,
+    1.6, 0.0, 2.4,
+    2.4, 2.4, 0.0,
+];
+let dm = DistanceMatrix::new(names, mat)?;
+let tree = upgma(&dm)?;
+println!("Newick: {}", tree.to_newick());
+```
+
+### 5. In Silico Trypsin Digestion & Peptide Mass
+```rust
+use scies_bio_th::proteomics::{digest, Enzyme};
+use scies_bio_th::seq::Protein;
+
+let protein = Protein::new(b"MKTLLLLAVGKSAR")?;
+let peptides = digest(&protein, Enzyme::Trypsin, 0);
+
+for pep in peptides {
+    println!("Peptide: {} | Mass: {:.2} Da", 
+        String::from_utf8_lossy(&pep.sequence.sequence), pep.mass_da);
+}
+```
+
 ---
 
 ## 🧪 Testing & Verification
 
-Run the full test suite (48 tests passing):
+Run the full test suite (66+ tests passing):
 ```bash
 cargo test
 ```

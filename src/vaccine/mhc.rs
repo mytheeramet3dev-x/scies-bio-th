@@ -86,7 +86,7 @@ pub fn predict_mhc_binding(
 
     // Immunogenicity score weights both high affinity (<500 nM) and high DAI (novelty vs self)
     let affinity_component = ((500.0 - mut_ic50).max(0.0) / 500.0) * 60.0;
-    let novelty_component = ((dai - 1.0).max(0.0).min(10.0) / 10.0) * 40.0;
+    let novelty_component = ((dai - 1.0).clamp(0.0, 10.0) / 10.0) * 40.0;
     let immunogenicity_score = (affinity_component + novelty_component).clamp(0.0, 100.0);
 
     Ok(MhcBindingResult {

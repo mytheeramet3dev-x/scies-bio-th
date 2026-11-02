@@ -12,9 +12,11 @@ pub enum FeatureType {
     Other(String),
 }
 
-impl FeatureType {
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for FeatureType {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "gene" => FeatureType::Gene,
             "transcript" | "mRNA" => FeatureType::Transcript,
             "exon" => FeatureType::Exon,
@@ -22,7 +24,15 @@ impl FeatureType {
             "five_prime_UTR" | "5UTR" => FeatureType::FivePrimeUtr,
             "three_prime_UTR" | "3UTR" => FeatureType::ThreePrimeUtr,
             other => FeatureType::Other(other.to_string()),
-        }
+        })
+    }
+}
+
+impl FeatureType {
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Self {
+        use std::str::FromStr;
+        <Self as FromStr>::from_str(s).unwrap()
     }
 }
 

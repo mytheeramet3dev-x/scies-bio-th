@@ -121,7 +121,7 @@ mod tests {
 
         let (score, path) = hmm.viterbi(b"ACGT");
         assert!(score > f64::NEG_INFINITY, "Should find a valid path");
-        assert!(path.len() > 0);
+        assert!(!path.is_empty());
         assert_eq!(path[0], HmmState::Start);
     }
 

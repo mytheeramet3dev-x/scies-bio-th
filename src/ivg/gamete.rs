@@ -237,17 +237,19 @@ fn simulate_meiotic_reduction(diploid_bytes: &[u8], seed: u64) -> Vec<u8> {
     }
     // Simple deterministic pseudo-random shuffling / crossover selection based on seed
     let len = diploid_bytes.len();
-    let mut out = Vec::with_capacity(len);
+    let mut out = diploid_bytes.to_vec();
     let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
 
-    for (i, &b) in diploid_bytes.iter().enumerate() {
+    let mut i = 0;
+    while i + 1 < len {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
         let swap = (state >> 32) as u32 % 100 < 5; // 5% crossover perturbation rate
-        if swap && (i + 1 < len) {
-            // Crossover permutation
-            out.push(b);
+        if swap {
+            // Meiotic crossover segment swap between adjacent nucleotides
+            out.swap(i, i + 1);
+            i += 2;
         } else {
-            out.push(b);
+            i += 1;
         }
     }
     out
@@ -268,5 +270,16 @@ mod tests {
         assert_eq!(oocyte.quality.mitochondrial_count, 100_000);
         assert!(oocyte.quality.polar_body_extruded);
         assert!(oocyte.quality.overall_score > 70.0);
+    }
+
+    #[test]
+    fn test_meiotic_reduction_crossover() {
+        let original = b"ATGCGATCGATCGATCGATC";
+        // Run with seeds to check that meiotic reduction maintains length and valid bases
+        for seed in [1, 42, 12345, 99999] {
+            let reduced = simulate_meiotic_reduction(original, seed);
+            assert_eq!(reduced.len(), original.len());
+            assert!(Dna::new(&reduced).is_ok());
+        }
     }
 }

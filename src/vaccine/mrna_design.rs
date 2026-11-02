@@ -88,7 +88,7 @@ impl MrnaVaccineConstruct {
         full_dna_builder.extend_from_slice(&optimized_orf_dna.sequence);
         full_dna_builder.extend_from_slice(b"TGATAA"); // Tandem dual stop codons
         full_dna_builder.extend_from_slice(DUAL_3_PRIME_UTR);
-        full_dna_builder.extend(std::iter::repeat(b'A').take(120)); // 120-nt Poly-A tail
+        full_dna_builder.extend(std::iter::repeat_n(b'A', 120)); // 120-nt Poly-A tail
 
         // Convert DNA representation to mature mRNA (T -> U)
         let mut rna_bytes = Vec::with_capacity(full_dna_builder.len());

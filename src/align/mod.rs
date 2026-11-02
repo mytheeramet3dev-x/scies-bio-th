@@ -20,18 +20,21 @@ impl NeedlemanWunsch {
     pub fn align(&self, seq1: &[u8], seq2: &[u8]) -> AlignmentResult {
         let n = seq1.len();
         let m = seq2.len();
-        let mut score_matrix = vec![vec![0; m + 1]; n + 1];
+        let cols = m + 1;
+        let mut matrix = vec![0i32; (n + 1) * cols];
 
         // Initialization
-        for i in 0..=n {
-            score_matrix[i][0] = i as i32 * self.gap_penalty;
+        for (i, row) in matrix.chunks_exact_mut(cols).enumerate().take(n + 1) {
+            row[0] = i as i32 * self.gap_penalty;
         }
-        for j in 0..=m {
-            score_matrix[0][j] = j as i32 * self.gap_penalty;
+        for (j, cell) in matrix[..cols].iter_mut().enumerate() {
+            *cell = j as i32 * self.gap_penalty;
         }
 
         // DP filling
         for i in 1..=n {
+            let row_offset = i * cols;
+            let prev_row_offset = (i - 1) * cols;
             for j in 1..=m {
                 let match_mismatch = if seq1[i - 1] == seq2[j - 1] {
                     self.match_score
@@ -39,11 +42,11 @@ impl NeedlemanWunsch {
                     self.mismatch_score
                 };
 
-                let diag = score_matrix[i - 1][j - 1] + match_mismatch;
-                let up = score_matrix[i - 1][j] + self.gap_penalty;
-                let left = score_matrix[i][j - 1] + self.gap_penalty;
+                let diag = matrix[prev_row_offset + j - 1] + match_mismatch;
+                let up = matrix[prev_row_offset + j] + self.gap_penalty;
+                let left = matrix[row_offset + j - 1] + self.gap_penalty;
 
-                score_matrix[i][j] = diag.max(up).max(left);
+                matrix[row_offset + j] = diag.max(up).max(left);
             }
         }
 
@@ -52,18 +55,19 @@ impl NeedlemanWunsch {
         let mut align2 = Vec::new();
         let mut i = n;
         let mut j = m;
-        let score = score_matrix[n][m];
+        let score = matrix[n * cols + m];
 
         while i > 0 || j > 0 {
+            let curr_offset = i * cols + j;
             if i > 0 && j > 0 {
-                let current_score = score_matrix[i][j];
+                let current_score = matrix[curr_offset];
                 let match_mismatch = if seq1[i - 1] == seq2[j - 1] {
                     self.match_score
                 } else {
                     self.mismatch_score
                 };
 
-                if current_score == score_matrix[i - 1][j - 1] + match_mismatch {
+                if current_score == matrix[(i - 1) * cols + (j - 1)] + match_mismatch {
                     align1.push(seq1[i - 1]);
                     align2.push(seq2[j - 1]);
                     i -= 1;
@@ -71,7 +75,7 @@ impl NeedlemanWunsch {
                     continue;
                 }
             }
-            if i > 0 && (j == 0 || score_matrix[i][j] == score_matrix[i - 1][j] + self.gap_penalty) {
+            if i > 0 && (j == 0 || matrix[curr_offset] == matrix[(i - 1) * cols + j] + self.gap_penalty) {
                 align1.push(seq1[i - 1]);
                 align2.push(b'-');
                 i -= 1;
@@ -107,13 +111,16 @@ impl SmithWaterman {
     pub fn align(&self, seq1: &[u8], seq2: &[u8]) -> AlignmentResult {
         let n = seq1.len();
         let m = seq2.len();
-        let mut score_matrix = vec![vec![0; m + 1]; n + 1];
+        let cols = m + 1;
+        let mut matrix = vec![0i32; (n + 1) * cols];
         let mut max_score = 0;
         let mut max_i = 0;
         let mut max_j = 0;
 
-        // DP filling (initialization is 0, which is handled by vec![vec![0; ...]])
+        // DP filling
         for i in 1..=n {
+            let row_offset = i * cols;
+            let prev_row_offset = (i - 1) * cols;
             for j in 1..=m {
                 let match_mismatch = if seq1[i - 1] == seq2[j - 1] {
                     self.match_score
@@ -121,12 +128,12 @@ impl SmithWaterman {
                     self.mismatch_score
                 };
 
-                let diag = score_matrix[i - 1][j - 1] + match_mismatch;
-                let up = score_matrix[i - 1][j] + self.gap_penalty;
-                let left = score_matrix[i][j - 1] + self.gap_penalty;
+                let diag = matrix[prev_row_offset + j - 1] + match_mismatch;
+                let up = matrix[prev_row_offset + j] + self.gap_penalty;
+                let left = matrix[row_offset + j - 1] + self.gap_penalty;
 
                 let score = max(0, diag.max(up).max(left));
-                score_matrix[i][j] = score;
+                matrix[row_offset + j] = score;
 
                 if score > max_score {
                     max_score = score;
@@ -142,20 +149,20 @@ impl SmithWaterman {
         let mut i = max_i;
         let mut j = max_j;
 
-        while i > 0 && j > 0 && score_matrix[i][j] > 0 {
-            let current_score = score_matrix[i][j];
+        while i > 0 && j > 0 && matrix[i * cols + j] > 0 {
+            let current_score = matrix[i * cols + j];
             let match_mismatch = if seq1[i - 1] == seq2[j - 1] {
                 self.match_score
             } else {
                 self.mismatch_score
             };
 
-            if current_score == score_matrix[i - 1][j - 1] + match_mismatch {
+            if current_score == matrix[(i - 1) * cols + (j - 1)] + match_mismatch {
                 align1.push(seq1[i - 1]);
                 align2.push(seq2[j - 1]);
                 i -= 1;
                 j -= 1;
-            } else if current_score == score_matrix[i - 1][j] + self.gap_penalty {
+            } else if current_score == matrix[(i - 1) * cols + j] + self.gap_penalty {
                 align1.push(seq1[i - 1]);
                 align2.push(b'-');
                 i -= 1;
@@ -184,8 +191,8 @@ pub fn levenshtein_distance(seq1: &[u8], seq2: &[u8]) -> usize {
     if m == 0 { return n; }
 
     let mut dp = vec![0; m + 1];
-    for j in 0..=m {
-        dp[j] = j;
+    for (j, cell) in dp.iter_mut().enumerate() {
+        *cell = j;
     }
 
     for i in 1..=n {

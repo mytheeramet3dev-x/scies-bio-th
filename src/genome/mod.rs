@@ -33,6 +33,10 @@ impl Interval {
         self.end - self.start
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
+
     pub fn overlaps(&self, other: &Interval) -> bool {
         self.chrom == other.chrom && self.start < other.end && other.start < self.end
     }

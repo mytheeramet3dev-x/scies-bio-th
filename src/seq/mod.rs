@@ -102,7 +102,6 @@ impl Protein {
 
 /// A fixed-size K-mer sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Kmer<const N: usize> {
     pub sequence: [u8; N],
 }
@@ -113,6 +112,59 @@ impl<const N: usize> Kmer<N> {
         let mut sequence = [0u8; N];
         sequence.copy_from_slice(seq);
         Self { sequence }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<const N: usize> serde::Serialize for Kmer<N> {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.sequence)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, const N: usize> serde::Deserialize<'de> for Kmer<N> {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct KmerVisitor<const N: usize>;
+        impl<'de, const N: usize> serde::de::Visitor<'de> for KmerVisitor<N> {
+            type Value = Kmer<N>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "a byte array of length {}", N)
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> std::result::Result<Kmer<N>, E>
+            where
+                E: serde::de::Error,
+            {
+                if v.len() != N {
+                    return Err(E::custom(format!("expected length {}, got {}", N, v.len())));
+                }
+                let mut arr = [0u8; N];
+                arr.copy_from_slice(v);
+                Ok(Kmer { sequence: arr })
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Kmer<N>, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut arr = [0u8; N];
+                for item in arr.iter_mut().take(N) {
+                    *item = seq
+                        .next_element()?
+                        .ok_or_else(|| serde::de::Error::custom("insufficient elements"))?;
+                }
+                Ok(Kmer { sequence: arr })
+            }
+        }
+        deserializer.deserialize_bytes(KmerVisitor::<N>)
     }
 }
 
@@ -157,5 +209,14 @@ mod tests {
         let protein = Protein::new(b"ARNDCEQGHILKMFPSTWYVX*").unwrap();
         assert_eq!(protein.sequence.len(), 22);
         assert!(Protein::new(b"J").is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_kmer_serde() {
+        let kmer: Kmer<4> = Kmer::new(b"ATGC");
+        let serialized = serde_json::to_string(&kmer).unwrap();
+        let deserialized: Kmer<4> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(kmer, deserialized);
     }
 }

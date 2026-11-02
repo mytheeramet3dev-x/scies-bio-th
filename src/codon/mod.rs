@@ -1,3 +1,4 @@
+use crate::genome::Strand;
 use crate::seq::{Dna, Protein, Rna};
 use std::collections::HashMap;
 
@@ -44,19 +45,28 @@ impl CodonTable {
     pub fn translate(&self, rna: &Rna) -> crate::Result<Protein> {
         let mut protein_seq = Vec::new();
         let bytes = &rna.sequence;
-        
-        for chunk in bytes.chunks_exact(3) {
-            let mut codon = [0u8; 3];
-            codon.copy_from_slice(chunk);
-            if let Some(&aa) = self.table.get(&codon) {
+        let (chunks, _) = bytes.as_chunks::<3>();
+
+        for chunk in chunks {
+            if let Some(&aa) = self.table.get(chunk) {
                 protein_seq.push(aa);
             } else {
                 protein_seq.push(b'X'); // Unknown amino acid
             }
         }
-        
+
         Protein::new(&protein_seq)
     }
+}
+
+/// A located Open Reading Frame (ORF).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrfRegion {
+    pub dna: Dna,
+    pub strand: Strand,
+    pub frame: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
 pub struct OrfFinder {
@@ -69,43 +79,61 @@ impl OrfFinder {
         Self { min_len_codons: 30 }
     }
 
-    /// Finds Open Reading Frames (ORFs) in a DNA sequence.
-    /// An ORF starts with ATG and ends with a stop codon (TAA, TAG, TGA).
-    /// Scans all 6 frames (3 forward, 3 reverse complement).
-    pub fn find_orfs(&self, seq: &Dna) -> Vec<Dna> {
+    /// Finds Open Reading Frames (ORFs) along with their genomic coordinates and strand.
+    pub fn find_orf_regions(&self, seq: &Dna) -> Vec<OrfRegion> {
         let mut orfs = Vec::new();
-        
+        let total_len = seq.sequence.len();
+
         let frames = [
-            seq.clone(),
-            seq.reverse_complement(),
+            (seq.clone(), Strand::Forward),
+            (seq.reverse_complement(), Strand::Reverse),
         ];
-        
-        for frame in frames {
-            let bytes = &frame.sequence;
+
+        for (frame_dna, strand) in frames {
+            let bytes = &frame_dna.sequence;
             for offset in 0..3 {
                 let mut start_idx = None;
                 let mut i = offset;
                 while i + 2 < bytes.len() {
-                    let codon = &bytes[i..i+3];
+                    let codon = &bytes[i..i + 3];
                     if codon == b"ATG" && start_idx.is_none() {
                         start_idx = Some(i);
-                    } else if codon == b"TAA" || codon == b"TAG" || codon == b"TGA" {
-                        if let Some(start) = start_idx {
-                            let len_codons = (i + 3 - start) / 3;
-                            if len_codons >= self.min_len_codons {
-                                if let Ok(orf_dna) = Dna::new(&bytes[start..i+3]) {
-                                    orfs.push(orf_dna);
-                                }
+                    } else if (codon == b"TAA" || codon == b"TAG" || codon == b"TGA")
+                        && start_idx.is_some()
+                    {
+                        let start = start_idx.unwrap();
+                        let len_codons = (i + 3 - start) / 3;
+                        if len_codons >= self.min_len_codons {
+                            if let Ok(orf_dna) = Dna::new(&bytes[start..i + 3]) {
+                                let (coord_start, coord_end) = match strand {
+                                    Strand::Forward => (start, i + 3),
+                                    Strand::Reverse => (total_len - (i + 3), total_len - start),
+                                    Strand::Unknown => (start, i + 3),
+                                };
+                                orfs.push(OrfRegion {
+                                    dna: orf_dna,
+                                    strand,
+                                    frame: offset,
+                                    start: coord_start,
+                                    end: coord_end,
+                                });
                             }
-                            start_idx = None;
                         }
+                        start_idx = None;
                     }
                     i += 3;
                 }
             }
         }
-        
+
         orfs
+    }
+
+    /// Finds Open Reading Frames (ORFs) in a DNA sequence.
+    /// An ORF starts with ATG and ends with a stop codon (TAA, TAG, TGA).
+    /// Scans all 6 frames (3 forward, 3 reverse complement).
+    pub fn find_orfs(&self, seq: &Dna) -> Vec<Dna> {
+        self.find_orf_regions(seq).into_iter().map(|r| r.dna).collect()
     }
 }
 
@@ -140,15 +168,23 @@ mod tests {
     }
 
     #[test]
-    fn test_orf_finder_reverse() {
+    fn test_orf_regions() {
         let mut finder = OrfFinder::new();
         finder.min_len_codons = 3;
-        
-        // Reverse complement of ATG CCC TAA is TTA GGG CAT
-        // If we put TTAGGGCAT, its reverse complement is ATGCCCTAA which has a valid ORF
-        let dna = Dna::new(b"TTAGGGCAT").unwrap();
-        let orfs = finder.find_orfs(&dna);
-        assert_eq!(orfs.len(), 1);
-        assert_eq!(orfs[0].sequence, b"ATGCCCTAA");
+
+        // Forward: ATGCCCTAA at [0, 9)
+        let dna = Dna::new(b"ATGCCCTAAGGG").unwrap();
+        let regions = finder.find_orf_regions(&dna);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].start, 0);
+        assert_eq!(regions[0].end, 9);
+        assert_eq!(regions[0].strand, Strand::Forward);
+
+        // Reverse: TTAGGGCAT
+        let dna_rev = Dna::new(b"NNNTTAGGGCAT").unwrap();
+        let regions_rev = finder.find_orf_regions(&dna_rev);
+        assert_eq!(regions_rev.len(), 1);
+        assert_eq!(regions_rev[0].strand, Strand::Reverse);
+        assert_eq!(regions_rev[0].dna.sequence, b"ATGCCCTAA");
     }
 }

@@ -46,6 +46,11 @@ impl Pwm {
         self.weights.len()
     }
 
+    /// Returns true if this PWM has no positions.
+    pub fn is_empty(&self) -> bool {
+        self.weights.is_empty()
+    }
+
     /// Scores a DNA k-mer against this PWM. Returns None for invalid characters.
     pub fn score(&self, kmer: &[u8]) -> Option<f64> {
         if kmer.len() != self.weights.len() {

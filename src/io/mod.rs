@@ -25,13 +25,14 @@ impl<R: BufRead> FastaReader<R> {
         }
         
         let trimmed = first_line.trim_end();
-        if !trimmed.starts_with('>') {
-            return Err(BioError::ParseError("FASTA must start with '>'".to_string()));
-        }
+        let next_id = match trimmed.strip_prefix('>') {
+            Some(id) => Some(id.to_string()),
+            None => return Err(BioError::ParseError("FASTA must start with '>'".to_string())),
+        };
         
         Ok(Self {
             reader,
-            next_id: Some(trimmed[1..].to_string()),
+            next_id,
         })
     }
 }
@@ -51,8 +52,8 @@ impl<R: BufRead> Iterator for FastaReader<R> {
                 Ok(0) => break, // EOF
                 Ok(_) => {
                     let trimmed = line.trim_end();
-                    if trimmed.starts_with('>') {
-                        next_id = Some(trimmed[1..].to_string());
+                    if let Some(stripped) = trimmed.strip_prefix('>') {
+                        next_id = Some(stripped.to_string());
                         break;
                     } else if !trimmed.is_empty() {
                         sequence.extend_from_slice(trimmed.as_bytes());

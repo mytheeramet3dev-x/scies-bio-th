@@ -8,6 +8,7 @@ pub enum BioError {
     IncompatibleGamete(String),
     DevelopmentArrested(String),
     SimulationError(String),
+    InvalidInput(String),
 }
 
 impl std::fmt::Display for BioError {
@@ -21,6 +22,7 @@ impl std::fmt::Display for BioError {
             BioError::IncompatibleGamete(e) => write!(f, "Incompatible gametes: {}", e),
             BioError::DevelopmentArrested(e) => write!(f, "Embryonic development arrested: {}", e),
             BioError::SimulationError(e) => write!(f, "Simulation error: {}", e),
+            BioError::InvalidInput(e) => write!(f, "Invalid input: {}", e),
         }
     }
 }

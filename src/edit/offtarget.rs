@@ -12,10 +12,7 @@ pub fn calculate_mismatch_score(sgrna: &Rna, target: &Dna) -> OffTargetScore {
     
     for (r, d) in sgrna.sequence.iter().zip(target.sequence.iter()) {
         // RNA has U, DNA has T. They should match.
-        let is_match = match (r, d) {
-            (b'A', b'A') | (b'C', b'C') | (b'G', b'G') | (b'U', b'T') => true,
-            _ => false,
-        };
+        let is_match = matches!((r, d), (b'A', b'A') | (b'C', b'C') | (b'G', b'G') | (b'U', b'T'));
         if !is_match {
             mismatches += 1;
         }
@@ -35,10 +32,7 @@ pub fn calculate_cfd_score(sgrna: &Rna, target: &Dna) -> OffTargetScore {
     let len = sgrna.sequence.len();
     
     for (i, (r, d)) in sgrna.sequence.iter().zip(target.sequence.iter()).enumerate() {
-        let is_match = match (r, d) {
-            (b'A', b'A') | (b'C', b'C') | (b'G', b'G') | (b'U', b'T') => true,
-            _ => false,
-        };
+        let is_match = matches!((r, d), (b'A', b'A') | (b'C', b'C') | (b'G', b'G') | (b'U', b'T'));
         
         if !is_match {
             mismatches += 1;
