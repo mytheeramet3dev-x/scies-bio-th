@@ -1,5 +1,6 @@
 //! scies-bio-th — A high-performance bio toolkit for Rust.
 
+pub mod aging;
 pub mod align;
 pub mod annotation;
 pub mod codon;

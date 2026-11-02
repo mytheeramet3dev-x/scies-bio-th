@@ -28,6 +28,7 @@ scies_bio_th::
 ├── genomics       — K-mer spectrum counting and De Bruijn Graph unitig sequence assembly
 ├── transcriptomics— Expression normalization: Transcripts Per Million (TPM), RPKM, and CPM
 ├── proteomics     — In silico proteolytic cleavage (Trypsin, Chymotrypsin, LysC), monoisotopic mass & pI
+├── aging          — Longevity engineering, Telomere dynamics (TTAGGG), Telomerase (TERT), and Immortal genome design
 └── metagenomics   — Alpha diversity metrics: Shannon-Wiener index, Simpson, Evenness, and Chao1
 ```
 
@@ -117,11 +118,28 @@ for pep in peptides {
 }
 ```
 
+### 6. Longevity & Immortal Synthetic Genome Design (v0.4.0)
+```rust
+use scies_bio_th::aging::{
+    AgingProfile, LongevityStrategy, design_immortal_genome_package
+};
+
+let subject = AgingProfile::youthful_adult(50.0);
+let report = design_immortal_genome_package(&subject, LongevityStrategy::Balanced);
+
+println!("Projected Lifespan Extension: +{:.1}%", report.projected_lifespan_extension_percent);
+println!("Oncogenic Risk Index: {:.3}", report.oncogenic_risk_index);
+
+for edit in &report.proposed_edits {
+    println!("Edit Target: {} ({:?}) | Priority: {}", edit.target_gene, edit.edit_type, edit.priority);
+}
+```
+
 ---
 
 ## 🧪 Testing & Verification
 
-Run the full test suite (66+ tests passing):
+Run the full test suite (75+ tests passing):
 ```bash
 cargo test
 ```
