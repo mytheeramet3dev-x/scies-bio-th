@@ -9,6 +9,7 @@ pub enum BioError {
     DevelopmentArrested(String),
     SimulationError(String),
     InvalidInput(String),
+    IoError(String),
 }
 
 impl std::fmt::Display for BioError {
@@ -23,6 +24,7 @@ impl std::fmt::Display for BioError {
             BioError::DevelopmentArrested(e) => write!(f, "Embryonic development arrested: {}", e),
             BioError::SimulationError(e) => write!(f, "Simulation error: {}", e),
             BioError::InvalidInput(e) => write!(f, "Invalid input: {}", e),
+            BioError::IoError(e) => write!(f, "I/O error: {}", e),
         }
     }
 }

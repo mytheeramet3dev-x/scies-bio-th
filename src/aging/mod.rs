@@ -9,17 +9,37 @@
 
 pub mod clock;
 pub mod design;
+pub mod fidelity;
 pub mod pathways;
+pub mod real_genome;
+pub mod report;
+pub mod risk;
 pub mod telomerase;
 pub mod telomere;
 
 pub use clock::{calculate_aging_acceleration, estimate_biological_age, AgingProfile};
 pub use design::{
-    design_immortal_genome_package, EditType, LongevityDesignReport, LongevityStrategy,
-    ProposedLongevityEdit,
+    design_high_fidelity_longevity_package, design_immortal_genome_package, EditType,
+    LongevityDesignReport, LongevityStrategy, ProposedLongevityEdit,
+};
+pub use fidelity::{
+    apply_high_fidelity_telomerase, estimate_high_fidelity_biological_age,
+    simulate_high_fidelity_shortening, HighFidelityAgeParams, HighFidelityAgeResult,
+    HighFidelityTelomereState, TelomeraseKinetics,
 };
 pub use pathways::{
     find_longevity_gene, LongevityGeneInfo, LongevityPathway, CANONICAL_LONGEVITY_GENES,
+};
+pub use real_genome::{
+    analyze_real_telomere, load_telomere_regions_from_fasta, load_telomere_regions_from_file,
+    ChromosomeArm, TelomereAnalysis, TelomereRegion, CANONICAL_FORWARD_REPEAT,
+    CANONICAL_REVERSE_REPEAT, FORWARD_VARIANT_REPEATS, REVERSE_VARIANT_REPEATS,
+};
+pub use report::{
+    HighFidelityDesignReport, HighFidelityProposedEdit, LongevityMetricsComparison,
+};
+pub use risk::{
+    evaluate_oncogenic_risk, OncogenicRiskAssessment, PathwayRiskBreakdown, SafetyLocks,
 };
 pub use telomerase::{apply_telomerase, cancer_risk_factor, TelomeraseActivity};
 pub use telomere::{

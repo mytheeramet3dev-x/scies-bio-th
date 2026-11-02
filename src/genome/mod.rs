@@ -1,7 +1,11 @@
 use std::cmp::Ordering;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// A strand of a genomic feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Strand {
     Forward,
     Reverse,
@@ -10,6 +14,7 @@ pub enum Strand {
 
 /// A genomic interval [start, end) on a given chromosome/contig.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Interval {
     pub chrom: String,
     pub start: u64,

@@ -4,10 +4,19 @@
 //! and produces an integrated LongevityDesignReport balancing replicative immortalization against oncogenesis.
 
 use crate::aging::clock::{estimate_biological_age, AgingProfile};
+use crate::aging::fidelity::{
+    apply_high_fidelity_telomerase, estimate_high_fidelity_biological_age,
+    simulate_high_fidelity_shortening, HighFidelityAgeParams, TelomeraseKinetics,
+};
 use crate::aging::pathways::find_longevity_gene;
+use crate::aging::report::{
+    HighFidelityDesignReport, HighFidelityProposedEdit, LongevityMetricsComparison,
+};
+use crate::aging::risk::{evaluate_oncogenic_risk, SafetyLocks};
 use crate::aging::telomerase::{apply_telomerase, TelomeraseActivity};
 use crate::edit::crispr::{generate_sgrna_candidates, SgRnaCandidate};
 use crate::edit::offtarget::calculate_cfd_score;
+use crate::genome::Strand;
 use crate::seq::Dna;
 
 #[cfg(feature = "serde")]
@@ -305,6 +314,399 @@ pub fn design_immortal_genome_package(
     }
 }
 
+/// Designs high-fidelity longevity genomic edits using real chromosomal locus contexts.
+pub fn design_high_fidelity_longevity_package(
+    subject: &HighFidelityAgeParams,
+    strategy: LongevityStrategy,
+    custom_loci: Option<&[(&str, &Dna)]>,
+) -> HighFidelityDesignReport {
+    let get_target_seq = |gene_symbol: &str, default_seq: &[u8]| -> Dna {
+        if let Some(loci) = custom_loci {
+            if let Some((_, dna)) = loci.iter().find(|(sym, _)| sym.eq_ignore_ascii_case(gene_symbol)) {
+                return (*dna).clone();
+            }
+        }
+        Dna::new(default_seq).unwrap()
+    };
+
+    let build_edit = |gene_symbol: &str,
+                      edit_type: EditType,
+                      default_chrom: &str,
+                      start_pos: u64,
+                      end_pos: u64,
+                      strand: Strand,
+                      default_dna: &[u8],
+                      rationale: &str,
+                      priority: u8,
+                      execution_step: u8|
+     -> HighFidelityProposedEdit {
+        let target_sequence = get_target_seq(gene_symbol, default_dna);
+        let sgrna_candidates = generate_sgrna_candidates(&target_sequence);
+
+        let mut best_guide = None;
+        let mut best_gc_diff = 1.0;
+        for cand in sgrna_candidates {
+            let gc = cand.sequence.gc_content();
+            let diff = (gc - 0.50).abs();
+            if diff < best_gc_diff {
+                best_gc_diff = diff;
+                best_guide = Some(cand);
+            }
+        }
+
+        let (offtarget_score, confidence) = if let Some(ref guide) = best_guide {
+            let cfd = calculate_cfd_score(&guide.sequence, &target_sequence);
+            let offtarget_penalty = (100.0 - cfd.score).clamp(1.0, 50.0);
+            let gc_quality = 1.0 - best_gc_diff * 1.8;
+            let cfd_quality = (cfd.score / 100.0).clamp(0.2, 1.0);
+            let conf = (0.5 * gc_quality + 0.5 * cfd_quality).clamp(0.25, 0.98);
+            (offtarget_penalty, conf)
+        } else {
+            (15.0, 0.50)
+        };
+
+        HighFidelityProposedEdit {
+            target_gene: gene_symbol.to_string(),
+            edit_type,
+            chromosome: default_chrom.to_string(),
+            start_pos,
+            end_pos,
+            strand,
+            target_sequence,
+            rationale: rationale.to_string(),
+            priority,
+            execution_step,
+            recommended_sgrna: best_guide,
+            offtarget_score,
+            confidence_score: confidence,
+        }
+    };
+
+    let mut proposed_edits = Vec::new();
+
+    match strategy {
+        LongevityStrategy::Conservative => {
+            // Safety First: TP53
+            proposed_edits.push(build_edit(
+                "TP53",
+                EditType::TumorSuppressorEnhancement,
+                "chr17",
+                7_668_402,
+                7_668_460,
+                Strand::Forward,
+                b"AAGTCGATCGATCGATCGATCGGGTCAAGTCGATC",
+                "Elephant-derived Super-p53 tandem safeguard preventing malignant transformation.",
+                1,
+                1,
+            ));
+            // Telomere Capping: POT1
+            proposed_edits.push(build_edit(
+                "POT1",
+                EditType::PromoterActivation,
+                "chr7",
+                12_487_000,
+                12_487_060,
+                Strand::Forward,
+                b"ATGCGATCGATCGATCGATCGGGCATCGATCGATC",
+                "Shelterin complex stabilization and single-stranded overhang capping.",
+                1,
+                2,
+            ));
+            // DNA Repair: SIRT6
+            proposed_edits.push(build_edit(
+                "SIRT6",
+                EditType::EnhanceDnaRepair,
+                "chr19",
+                4_170_240,
+                4_170_300,
+                Strand::Forward,
+                b"CGATCGATCGATCGATCGATCGGGCGATCGATCGAT",
+                "Enhances homologous recombination DSB repair without ectopic telomerase risk.",
+                2,
+                3,
+            ));
+            // Metabolic: FOXO3
+            proposed_edits.push(build_edit(
+                "FOXO3",
+                EditType::ProtectiveVariantKnockIn,
+                "chr6",
+                108_560_000,
+                108_560_060,
+                Strand::Forward,
+                b"TTGCAATCGATCGATCGATCGGGATCGATCGATCG",
+                "Centenarian protective G-allele (rs2802292) knock-in driving antioxidant defenses.",
+                2,
+                4,
+            ));
+            // Nuclear Architecture: LMNA
+            proposed_edits.push(build_edit(
+                "LMNA",
+                EditType::EnhanceDnaRepair,
+                "chr1",
+                156_108_500,
+                156_108_560,
+                Strand::Forward,
+                b"CCGTAGCTAGCTAGCTAGCTCGGGTAGCTAGCTAG",
+                "Progerin cryptic splice suppression maintaining nuclear lamina structural integrity.",
+                3,
+                5,
+            ));
+        }
+        LongevityStrategy::Balanced => {
+            // Safety First: TP53 + CDKN2A Senolytic Circuit
+            proposed_edits.push(build_edit(
+                "TP53",
+                EditType::TumorSuppressorEnhancement,
+                "chr17",
+                7_668_402,
+                7_668_460,
+                Strand::Forward,
+                b"AAGTCGATCGATCGATCGATCGGGTCAAGTCGATC",
+                "Elephant-derived Super-p53 tandem safeguard.",
+                1,
+                1,
+            ));
+            proposed_edits.push(build_edit(
+                "CDKN2A",
+                EditType::SenescenceClearance,
+                "chr9",
+                21_967_750,
+                21_967_810,
+                Strand::Forward,
+                b"CCGTAGCTAGCTAGCTAGCTCGGGTAGCTAGCTAG",
+                "Inducible senolytic suicide cassette (p16INK4a-driven caspase).",
+                1,
+                1,
+            ));
+            // Telomere Renewal: TERT
+            proposed_edits.push(build_edit(
+                "TERT",
+                EditType::PromoterActivation,
+                "chr5",
+                1_295_105,
+                1_295_160,
+                Strand::Reverse,
+                b"GCTAGCGATCGATCGATCGATCGGGCATCGATGCT",
+                "Regulated inducible telomerase reactivation overcoming replicative senescence.",
+                1,
+                2,
+            ));
+            // Repair Enhancement: SIRT6 & PARP1
+            proposed_edits.push(build_edit(
+                "SIRT6",
+                EditType::EnhanceDnaRepair,
+                "chr19",
+                4_170_240,
+                4_170_300,
+                Strand::Forward,
+                b"CGATCGATCGATCGATCGATCGGGCGATCGATCGAT",
+                "H3K9/H3K56 deacetylation & double-strand break repair enhancement.",
+                1,
+                3,
+            ));
+            proposed_edits.push(build_edit(
+                "PARP1",
+                EditType::EnhanceDnaRepair,
+                "chr1",
+                226_360_000,
+                226_360_060,
+                Strand::Forward,
+                b"ATGCGATCGATCGATCGATCGGGCATCGATCGATC",
+                "Single-strand break repair tuning and cellular NAD+ conservation.",
+                2,
+                3,
+            ));
+            // Metabolic: FOXO3
+            proposed_edits.push(build_edit(
+                "FOXO3",
+                EditType::ProtectiveVariantKnockIn,
+                "chr6",
+                108_560_000,
+                108_560_060,
+                Strand::Forward,
+                b"TTGCAATCGATCGATCGATCGGGATCGATCGATCG",
+                "Centenarian protective longevity variant knock-in.",
+                2,
+                4,
+            ));
+        }
+        LongevityStrategy::Aggressive => {
+            proposed_edits.push(build_edit(
+                "TP53",
+                EditType::TumorSuppressorEnhancement,
+                "chr17",
+                7_668_402,
+                7_668_460,
+                Strand::Forward,
+                b"AAGTCGATCGATCGATCGATCGGGTCAAGTCGATC",
+                "Pachyderm Super-p53 safeguard.",
+                1,
+                1,
+            ));
+            proposed_edits.push(build_edit(
+                "TERT",
+                EditType::PromoterActivation,
+                "chr5",
+                1_295_105,
+                1_295_160,
+                Strand::Reverse,
+                b"GCTAGCGATCGATCGATCGATCGGGCATCGATGCT",
+                "Maximal telomerase reverse transcriptase reactivation.",
+                1,
+                2,
+            ));
+            proposed_edits.push(build_edit(
+                "TERC",
+                EditType::PromoterActivation,
+                "chr3",
+                169_764_500,
+                169_764_560,
+                Strand::Forward,
+                b"TTGCAATCGATCGATCGATCGGGATCGATCGATCG",
+                "Telomerase RNA component overexpression for repeat elongation.",
+                1,
+                2,
+            ));
+            proposed_edits.push(build_edit(
+                "SIRT6",
+                EditType::EnhanceDnaRepair,
+                "chr19",
+                4_170_240,
+                4_170_300,
+                Strand::Forward,
+                b"CGATCGATCGATCGATCGATCGGGCGATCGATCGAT",
+                "Maximal chromatin stabilization and DNA double-strand repair.",
+                1,
+                3,
+            ));
+            proposed_edits.push(build_edit(
+                "ATM",
+                EditType::EnhanceDnaRepair,
+                "chr11",
+                108_223_000,
+                108_223_060,
+                Strand::Forward,
+                b"ATGCGATCGATCGATCGATCGGGCATCGATCGATC",
+                "Ataxia Telangiectasia Mutated kinase signaling calibration.",
+                2,
+                3,
+            ));
+            proposed_edits.push(build_edit(
+                "CDKN2A",
+                EditType::SenescenceClearance,
+                "chr9",
+                21_967_750,
+                21_967_810,
+                Strand::Forward,
+                b"CCGTAGCTAGCTAGCTAGCTCGGGTAGCTAGCTAG",
+                "Aggressive senolytic caspase induction ablating SASP.",
+                2,
+                4,
+            ));
+            proposed_edits.push(build_edit(
+                "MTOR",
+                EditType::ProtectiveVariantKnockIn,
+                "chr1",
+                11_106_500,
+                11_106_560,
+                Strand::Forward,
+                b"GCTAGCGATCGATCGATCGATCGGGCATCGATGCT",
+                "Downregulated basal mTORC1 activity promoting macroautophagy.",
+                3,
+                5,
+            ));
+        }
+    }
+
+    // Baseline aging profile and telomere state
+    let baseline_age_result = estimate_high_fidelity_biological_age(subject);
+    let baseline_telomere = simulate_high_fidelity_shortening(subject.telomere_length_bp, 0, 1.0, 1.0, 0.90);
+    let baseline_hayflick = baseline_telomere.replicative_lifespan();
+
+    // Telomerase simulation & projections
+    let (telomerase_level, lifespan_extension, projected_telomere_len, projected_capping, projected_hayflick) =
+        match strategy {
+            LongevityStrategy::Conservative => (
+                0.0,
+                32.0,
+                subject.telomere_length_bp,
+                (baseline_telomere.shelterin_capping + 0.05).min(0.98),
+                baseline_hayflick,
+            ),
+            LongevityStrategy::Balanced => {
+                let mut state = baseline_telomere.clone();
+                let kinetics = TelomeraseKinetics::standard_human();
+                apply_high_fidelity_telomerase(&mut state, &kinetics, 0.80, 35);
+                let hayflick = state.replicative_lifespan();
+                (0.80, 68.0, state.current_length_bp, state.shelterin_capping, hayflick)
+            }
+            LongevityStrategy::Aggressive => {
+                let mut state = baseline_telomere.clone();
+                let kinetics = TelomeraseKinetics::engineered_hyper_processive();
+                apply_high_fidelity_telomerase(&mut state, &kinetics, 0.95, 50);
+                let hayflick = state.replicative_lifespan();
+                (0.95, 125.0, state.current_length_bp, state.shelterin_capping, hayflick)
+            }
+        };
+
+    // Projected epigenetic and biological age
+    let (cpg_factor, dsb_factor, sasp_factor) = match strategy {
+        LongevityStrategy::Conservative => (0.70, 0.60, 0.70),
+        LongevityStrategy::Balanced => (0.45, 0.35, 0.40),
+        LongevityStrategy::Aggressive => (0.30, 0.20, 0.25),
+    };
+
+    let projected_params = HighFidelityAgeParams {
+        chronological_age: subject.chronological_age,
+        cpg_methylation_fraction: subject.cpg_methylation_fraction * cpg_factor,
+        telomere_length_bp: projected_telomere_len,
+        gamma_h2ax_foci: subject.gamma_h2ax_foci * dsb_factor,
+        sasp_burden: subject.sasp_burden * sasp_factor,
+    };
+    let projected_age_result = estimate_high_fidelity_biological_age(&projected_params);
+
+    // Safeguards & Oncogenic Risk
+    let safeguards = match strategy {
+        LongevityStrategy::Conservative => SafetyLocks::standard_protection(),
+        LongevityStrategy::Balanced => SafetyLocks::standard_protection(),
+        LongevityStrategy::Aggressive => SafetyLocks {
+            super_p53_active: true,
+            inducible_suicide_switch: true,
+            high_fidelity_nuclease: true,
+            cell_cycle_restriction: true,
+        },
+    };
+
+    let offtarget_fractions: Vec<f64> = proposed_edits.iter().map(|e| e.offtarget_score / 100.0).collect();
+    let oncogenic_risk = evaluate_oncogenic_risk(
+        telomerase_level,
+        &offtarget_fractions,
+        projected_capping,
+        &safeguards,
+    );
+
+    let metrics = LongevityMetricsComparison {
+        chronological_age: subject.chronological_age,
+        baseline_biological_age: baseline_age_result.composite_biological_age,
+        projected_biological_age: projected_age_result.composite_biological_age,
+        baseline_telomere_length_bp: subject.telomere_length_bp,
+        projected_telomere_length_bp: projected_telomere_len,
+        baseline_hayflick_divisions: baseline_hayflick,
+        projected_hayflick_divisions: projected_hayflick,
+        baseline_shelterin_capping: baseline_telomere.shelterin_capping,
+        projected_shelterin_capping: projected_capping,
+        projected_lifespan_extension_percent: lifespan_extension,
+    };
+
+    HighFidelityDesignReport {
+        strategy,
+        metrics,
+        age_breakdown: baseline_age_result,
+        proposed_edits,
+        oncogenic_risk,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,5 +745,36 @@ mod tests {
 
         assert!(conservative.oncogenic_risk_index < aggressive.oncogenic_risk_index);
         assert!(conservative.projected_lifespan_extension_percent < aggressive.projected_lifespan_extension_percent);
+    }
+
+    #[test]
+    fn test_high_fidelity_longevity_package_execution() {
+        let subject = HighFidelityAgeParams {
+            chronological_age: 55.0,
+            cpg_methylation_fraction: 0.48,
+            telomere_length_bp: 6_200.0,
+            gamma_h2ax_foci: 1.6,
+            sasp_burden: 0.35,
+        };
+
+        let custom_tert = Dna::new(b"GGGCCAGGGCCCTCGCCGCCGGGGCCCGGCTCGGCCCCCGCCGCGGCCCCGGCCCCGGCC").unwrap();
+        let loci = [("TERT", &custom_tert)];
+
+        let report = design_high_fidelity_longevity_package(&subject, LongevityStrategy::Balanced, Some(&loci));
+
+        assert_eq!(report.strategy, LongevityStrategy::Balanced);
+        assert!(report.metrics.projected_biological_age < report.metrics.baseline_biological_age);
+        assert!(report.metrics.projected_telomere_length_bp > report.metrics.baseline_telomere_length_bp);
+        assert!(report.oncogenic_risk.is_acceptable_safety_profile);
+        assert!(report.oncogenic_risk.net_risk_index < 0.12);
+
+        // Verify execution sequence order
+        let tp53_edit = report.proposed_edits.iter().find(|e| e.target_gene == "TP53").unwrap();
+        let tert_edit = report.proposed_edits.iter().find(|e| e.target_gene == "TERT").unwrap();
+        assert!(tp53_edit.execution_step <= tert_edit.execution_step);
+
+        let summary = report.export_detailed_summary();
+        assert!(summary.contains("SCIES-BIO-TH HIGH-FIDELITY LONGEVITY GENOME DESIGN REPORT"));
+        assert!(summary.contains("Sequential Intervention Workflow"));
     }
 }

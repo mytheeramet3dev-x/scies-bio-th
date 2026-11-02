@@ -74,6 +74,15 @@ impl Rna {
         }
         Ok(Self { sequence })
     }
+
+    /// Calculates the GC content of the RNA sequence.
+    pub fn gc_content(&self) -> f64 {
+        if self.sequence.is_empty() {
+            return 0.0;
+        }
+        let gc_count = self.sequence.iter().filter(|&&b| b == b'G' || b == b'C').count();
+        gc_count as f64 / self.sequence.len() as f64
+    }
 }
 
 /// A Protein sequence.
@@ -97,6 +106,15 @@ impl Protein {
             }
         }
         Ok(Self { sequence })
+    }
+
+    /// Calculates the GC content of the RNA sequence.
+    pub fn gc_content(&self) -> f64 {
+        if self.sequence.is_empty() {
+            return 0.0;
+        }
+        let gc_count = self.sequence.iter().filter(|&&b| b == b'G' || b == b'C').count();
+        gc_count as f64 / self.sequence.len() as f64
     }
 }
 

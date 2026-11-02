@@ -118,21 +118,27 @@ for pep in peptides {
 }
 ```
 
-### 6. Longevity & Immortal Synthetic Genome Design (v0.4.0)
+### 6. Real Genome Longevity & Synthetic Immortal Design (v0.5.0)
 ```rust
 use scies_bio_th::aging::{
-    AgingProfile, LongevityStrategy, design_immortal_genome_package
+    design_high_fidelity_longevity_package, load_telomere_regions_from_file,
+    HighFidelityAgeParams, LongevityStrategy,
 };
 
-let subject = AgingProfile::youthful_adult(50.0);
-let report = design_immortal_genome_package(&subject, LongevityStrategy::Balanced);
+// 1. Analyze actual chromosome ends from public assemblies (e.g. T2T-CHM13)
+let regions = load_telomere_regions_from_file("testdata/t2t_chr5_telomere_tert.fasta", &["chr5"])?;
+println!("Canonical Telomeric Repeats: {}", regions[0].analysis.canonical_repeats_count);
 
-println!("Projected Lifespan Extension: +{:.1}%", report.projected_lifespan_extension_percent);
-println!("Oncogenic Risk Index: {:.3}", report.oncogenic_risk_index);
-
-for edit in &report.proposed_edits {
-    println!("Edit Target: {} ({:?}) | Priority: {}", edit.target_gene, edit.edit_type, edit.priority);
-}
+// 2. High-Fidelity multi-factor longevity intervention design
+let subject = HighFidelityAgeParams {
+    chronological_age: 56.0,
+    cpg_methylation_fraction: 0.54,
+    telomere_length_bp: 5_900.0,
+    gamma_h2ax_foci: 2.2,
+    sasp_burden: 0.45,
+};
+let report = design_high_fidelity_longevity_package(&subject, LongevityStrategy::Balanced, None);
+println!("{}", report.export_detailed_summary());
 ```
 
 ---

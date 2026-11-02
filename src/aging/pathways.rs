@@ -18,6 +18,8 @@ pub enum LongevityPathway {
     NutrientSensingMetabolism,
     /// Senescence-associated secretory phenotype (SASP) and cell-cycle arrest (CDKN2A/p16, TP53).
     SenescenceControl,
+    /// Nuclear envelope integrity, chromatin anchoring, and laminopathies (LMNA).
+    NuclearArchitecture,
     /// Mitochondrial biogenesis, mitophagy, and reactive oxygen species buffering (PGC1A, TFAM).
     MitochondrialHomeostasis,
 }
@@ -116,6 +118,60 @@ pub const CANONICAL_LONGEVITY_GENES: &[LongevityGeneInfo] = &[
         recommended_action: "Pachyderm Extra Copy / Super-p53 Dosage Elevation",
         rationale: "Provides robust cancer surveillance and apoptosis clearance for cells acquiring oncogenic lesions.",
     },
+    LongevityGeneInfo {
+        symbol: "ATM",
+        name: "ATM Serine/Threonine Kinase",
+        pathway: LongevityPathway::DnaRepairGenomicStability,
+        chromosome: "chr11",
+        entrez_id: 472,
+        recommended_action: "Kinase Phosphorylation Optimization",
+        rationale: "Master coordinator of DNA double-strand break response and chromatin relaxation.",
+    },
+    LongevityGeneInfo {
+        symbol: "ATR",
+        name: "ATR Serine/Threonine Kinase",
+        pathway: LongevityPathway::DnaRepairGenomicStability,
+        chromosome: "chr3",
+        entrez_id: 545,
+        recommended_action: "Replication Stress Signaling Regulation",
+        rationale: "Responds to single-stranded DNA and stalled replication forks, preventing telomere fragility.",
+    },
+    LongevityGeneInfo {
+        symbol: "PARP1",
+        name: "Poly(ADP-Ribose) Polymerase 1",
+        pathway: LongevityPathway::DnaRepairGenomicStability,
+        chromosome: "chr1",
+        entrez_id: 142,
+        recommended_action: "NAD+ Sparing & Single-Strand Break Repair Tuning",
+        rationale: "Detects single-strand DNA breaks and initiates base excision repair while conserving cellular NAD+.",
+    },
+    LongevityGeneInfo {
+        symbol: "LMNA",
+        name: "Lamin A/C (Nuclear Lamina Structural Component)",
+        pathway: LongevityPathway::NuclearArchitecture,
+        chromosome: "chr1",
+        entrez_id: 4000,
+        recommended_action: "Cryptic Splice Site Correction (Progerin Resistance)",
+        rationale: "Prevents aberrant Hutchinson-Gilford progerin accumulation and maintains nuclear membrane rigidity.",
+    },
+    LongevityGeneInfo {
+        symbol: "MTOR",
+        name: "Mechanistic Target Of Rapamycin Kinase",
+        pathway: LongevityPathway::NutrientSensingMetabolism,
+        chromosome: "chr1",
+        entrez_id: 2475,
+        recommended_action: "Downregulated Basal mTORC1 Activity (Rapamycin Mimetic)",
+        rationale: "Inhibits cap-dependent translation while activating macroautophagy and lysosomal biogenesis.",
+    },
+    LongevityGeneInfo {
+        symbol: "AMPK",
+        name: "5'-AMP-Activated Protein Kinase (PRKAA1/Alpha 1)",
+        pathway: LongevityPathway::NutrientSensingMetabolism,
+        chromosome: "chr5",
+        entrez_id: 5562,
+        recommended_action: "Constitutive Low-Level Energy Sensor Activation",
+        rationale: "Phosphorylates ULK1 and FOXO3, promoting mitochondrial quality control and lipid oxidation.",
+    },
 ];
 
 /// Looks up curated longevity gene information by official gene symbol.
@@ -136,6 +192,14 @@ mod tests {
         let sirt6 = find_longevity_gene("sirt6").unwrap(); // Case-insensitive
         assert_eq!(sirt6.entrez_id, 51548);
         assert_eq!(sirt6.pathway, LongevityPathway::DnaRepairGenomicStability);
+
+        let lmna = find_longevity_gene("LMNA").unwrap();
+        assert_eq!(lmna.entrez_id, 4000);
+        assert_eq!(lmna.pathway, LongevityPathway::NuclearArchitecture);
+
+        let mtor = find_longevity_gene("mtor").unwrap();
+        assert_eq!(mtor.entrez_id, 2475);
+        assert_eq!(mtor.pathway, LongevityPathway::NutrientSensingMetabolism);
 
         assert!(find_longevity_gene("UNKNOWN_GENE").is_none());
     }

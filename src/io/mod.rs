@@ -9,6 +9,17 @@ pub struct FastaRecord {
     pub sequence: Vec<u8>,
 }
 
+impl FastaRecord {
+    /// Extracts a slice sub-region `[start, start + len)` from the sequence.
+    pub fn subsequence(&self, start: usize, len: usize) -> Option<&[u8]> {
+        if start >= self.sequence.len() {
+            return None;
+        }
+        let end = (start + len).min(self.sequence.len());
+        Some(&self.sequence[start..end])
+    }
+}
+
 pub struct FastaReader<R> {
     reader: R,
     next_id: Option<String>,
@@ -34,6 +45,40 @@ impl<R: BufRead> FastaReader<R> {
             reader,
             next_id,
         })
+    }
+
+    /// Reads and returns the next record whose ID/header satisfies the given predicate.
+    pub fn next_matching<P>(&mut self, mut predicate: P) -> Option<crate::Result<FastaRecord>>
+    where
+        P: FnMut(&str) -> bool,
+    {
+        for res in self.by_ref() {
+            match res {
+                Ok(rec) => {
+                    if predicate(&rec.id) {
+                        return Some(Ok(rec));
+                    }
+                }
+                Err(e) => return Some(Err(e)),
+            }
+        }
+        None
+    }
+}
+
+/// Reads the first FASTA record from a buffered stream matching the header predicate.
+pub fn read_fasta_record_matching<R: BufRead, P>(
+    reader: R,
+    predicate: P,
+) -> crate::Result<Option<FastaRecord>>
+where
+    P: FnMut(&str) -> bool,
+{
+    let mut fasta = FastaReader::new(reader)?;
+    match fasta.next_matching(predicate) {
+        Some(Ok(rec)) => Ok(Some(rec)),
+        Some(Err(e)) => Err(e),
+        None => Ok(None),
     }
 }
 
@@ -168,6 +213,18 @@ mod tests {
 
         let r2 = fasta.next().unwrap().unwrap();
         assert_eq!(r2.sequence, b"CGTA");
+    }
+
+    #[test]
+    fn test_fasta_matching_and_subsequence() {
+        let data = ">chr1 extra\nACGTACGT\n>chr5_telomere\nCCCTAACCCTAA\n>chr19_gene\nGGCC";
+        let reader = BufReader::new(data.as_bytes());
+        let rec = read_fasta_record_matching(reader, |h| h.contains("chr5")).unwrap().unwrap();
+        assert_eq!(rec.id, "chr5_telomere");
+        assert_eq!(rec.sequence, b"CCCTAACCCTAA");
+        assert_eq!(rec.subsequence(0, 6).unwrap(), b"CCCTAA");
+        assert_eq!(rec.subsequence(6, 6).unwrap(), b"CCCTAA");
+        assert!(rec.subsequence(20, 5).is_none());
     }
 
     #[test]
