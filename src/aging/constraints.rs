@@ -7,8 +7,17 @@
 //! 4. **Hazardous Off-target & Terminal Tract Guards**: Rejects guides in pure telomeric arrays or with fatal poly-T runs.
 
 use crate::aging::design::{EditType, LongevityStrategy};
-use crate::aging::report::HighFidelityProposedEdit;
+use crate::aging::guide::{design_real_guides, select_optimal_guide};
+use crate::aging::report::{HighFidelityProposedEdit, SequenceProvenance};
 use crate::aging::risk::SafetyLocks;
+use crate::genome::Strand;
+use crate::safety::audit::{
+    evaluate_intervention_safety, SafetyAuditReport, SafetyContext, SafetyRule,
+};
+use crate::safety::checkpoint::CheckpointInput;
+use crate::safety::immune::DeliveryPayloadProfile;
+use crate::safety::oncogene::OncogeneInterventionInput;
+use crate::seq::Dna;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -61,7 +70,64 @@ pub struct ConstraintViolation {
     pub remediation_applied: String,
 }
 
-/// Audits a set of proposed genomic edits against hard biological safety rules.
+/// Runs the formal `safety::audit` rule engine on the proposed longevity intervention parameters.
+pub fn audit_longevity_safety_formalism(
+    edits: &[HighFidelityProposedEdit],
+    telomerase_expression: f64,
+    safeguards: &SafetyLocks,
+) -> SafetyAuditReport {
+    let has_tert = edits.iter().any(|e| e.target_gene.eq_ignore_ascii_case("TERT"));
+    let has_tp53 = edits.iter().any(|e| e.target_gene.eq_ignore_ascii_case("TP53"));
+
+    let tp53_fold = if safeguards.super_p53_active || has_tp53 {
+        1.75
+    } else {
+        1.0
+    };
+    let tert_fold = if has_tert {
+        1.0 + telomerase_expression * 2.5
+    } else {
+        1.0
+    };
+
+    let ctx = SafetyContext {
+        checkpoint: CheckpointInput {
+            dsb_foci_per_cell: 0.8,
+            shortest_telomere_bp: 6500.0,
+            tp53_expression_fold: tp53_fold,
+            rb_p16_integrity: 1.0,
+            mitogenic_drive_fold: tert_fold.max(1.0),
+        },
+        oncogene: OncogeneInterventionInput {
+            tert_fold,
+            myc_fold: 1.0,
+            reprogramming_intensity: 0.15,
+            tumor_suppressor_fold: tp53_fold,
+            offtarget_cleavage_burden: 0.03,
+            has_suicide_switch: safeguards.inducible_suicide_switch,
+        },
+        delivery: DeliveryPayloadProfile {
+            unmethylated_cpg_fraction: 0.02,
+            pseudouridine_modification_fraction: 0.98,
+            dsrna_impurity_fraction: 0.0005,
+            viral_vector_moi: 0.0,
+        },
+    };
+
+    evaluate_intervention_safety(
+        &ctx,
+        &[
+            SafetyRule::CheckpointPrimacy,
+            SafetyRule::MaxOncogenicRisk(0.15),
+            SafetyRule::MaxImmuneTrigger(0.25),
+            SafetyRule::ForbidMycOverexpression(1.05),
+            SafetyRule::MaxOffTargetBurden(0.10),
+        ],
+    )
+}
+
+/// Audits a set of proposed genomic edits against hard biological safety rules,
+/// backed by `safety::checkpoint` and `safety::audit`.
 pub fn validate_biological_constraints(
     edits: &[HighFidelityProposedEdit],
     strategy: LongevityStrategy,
@@ -69,6 +135,7 @@ pub fn validate_biological_constraints(
     safeguards: &SafetyLocks,
 ) -> Vec<ConstraintViolation> {
     let mut violations = Vec::new();
+    let formal_audit = audit_longevity_safety_formalism(edits, telomerase_expression, safeguards);
 
     let has_tert = edits.iter().any(|e| e.target_gene.eq_ignore_ascii_case("TERT"));
     let has_tp53 = edits.iter().any(|e| e.target_gene.eq_ignore_ascii_case("TP53"));
@@ -84,8 +151,12 @@ pub fn validate_biological_constraints(
         });
     }
 
-    // 2. TERT without adequate safety locks
-    if (has_tert || telomerase_expression > 0.05) && (!safeguards.super_p53_active || !safeguards.inducible_suicide_switch) {
+    // 2. TERT without adequate safety locks (backed by formal_audit CheckpointPrimacy & MaxOncogenicRisk)
+    if (has_tert || telomerase_expression > 0.05)
+        && (!safeguards.super_p53_active
+            || !safeguards.inducible_suicide_switch
+            || !formal_audit.approved)
+    {
         violations.push(ConstraintViolation {
             violation_type: ConstraintViolationType::TertWithoutSafetyLock,
             severity: ConstraintSeverity::Critical,
@@ -176,6 +247,38 @@ pub fn enforce_and_auto_remediate(
                 safeguards.high_fidelity_nuclease = true;
             }
             ConstraintViolationType::InvertedExecutionOrder => {
+                let has_tert = edits.iter().any(|e| e.target_gene.eq_ignore_ascii_case("TERT"));
+                let has_tp53 = edits.iter().any(|e| e.target_gene.eq_ignore_ascii_case("TP53"));
+                if has_tert && !has_tp53 && strategy != LongevityStrategy::Conservative {
+                    let tp53_dna = Dna::new(b"AAGTCGATCGATCGATCGATCGGGTCAAGTCGATC").unwrap();
+                    let candidates = design_real_guides(&tp53_dna, Strand::Forward, 7_668_402);
+                    let best_guide = select_optimal_guide(&candidates);
+                    // Scores are derived from the computed guide, never hardcoded; the sequence itself is a
+                    // synthetic placeholder, so the edit is flagged and given a conservative fallback confidence.
+                    let (offtarget_score, confidence_score) = match best_guide {
+                        Some(ref g) => ((100.0 - g.offtarget_cfd_score).clamp(1.0, 50.0), g.confidence_score),
+                        None => (15.0, 0.45),
+                    };
+                    edits.insert(
+                        0,
+                        HighFidelityProposedEdit {
+                            sequence_provenance: SequenceProvenance::SyntheticPlaceholder,
+                            target_gene: "TP53".to_string(),
+                            edit_type: EditType::TumorSuppressorEnhancement,
+                            chromosome: "chr17".to_string(),
+                            start_pos: 7_668_402,
+                            end_pos: 7_668_460,
+                            strand: Strand::Forward,
+                            target_sequence: tp53_dna,
+                            rationale: "Auto-injected Pachyderm Super-p53 tandem safeguard.".to_string(),
+                            priority: 1,
+                            execution_step: 1,
+                            recommended_sgrna: best_guide,
+                            offtarget_score,
+                            confidence_score,
+                        },
+                    );
+                }
                 // Re-sort and normalize execution steps
                 for edit in edits.iter_mut() {
                     if edit.target_gene.eq_ignore_ascii_case("TP53") {
@@ -213,6 +316,7 @@ mod tests {
     #[test]
     fn test_enforce_tert_proscription_in_conservative_strategy() {
         let mut edits = vec![HighFidelityProposedEdit {
+            sequence_provenance: SequenceProvenance::SyntheticPlaceholder,
             target_gene: "TERT".to_string(),
             edit_type: EditType::PromoterActivation,
             chromosome: "chr5".to_string(),
@@ -247,6 +351,7 @@ mod tests {
     fn test_enforce_checkpoint_primacy_and_reorder() {
         let mut edits = vec![
             HighFidelityProposedEdit {
+            sequence_provenance: SequenceProvenance::SyntheticPlaceholder,
                 target_gene: "TERT".to_string(),
                 edit_type: EditType::PromoterActivation,
                 chromosome: "chr5".to_string(),
@@ -262,6 +367,7 @@ mod tests {
                 confidence_score: 0.9,
             },
             HighFidelityProposedEdit {
+            sequence_provenance: SequenceProvenance::SyntheticPlaceholder,
                 target_gene: "TP53".to_string(),
                 edit_type: EditType::TumorSuppressorEnhancement,
                 chromosome: "chr17".to_string(),

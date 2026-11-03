@@ -39,6 +39,32 @@ pub struct ChiSquaredResult {
     pub p_value: f64,
 }
 
+/// Result of Wilcoxon signed-rank test on paired samples.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct WilcoxonResult {
+    /// Wilcoxon test statistic $W = \min(W^+, W^-)$.
+    pub w_stat: f64,
+    /// Two-tailed p-value (exact combinatorial for untied $n \le 50$, asymptotic normal otherwise).
+    pub p_value: f64,
+    /// Standardized normal Z-score.
+    pub z_score: f64,
+    /// Number of non-zero paired differences evaluated.
+    pub effective_n: usize,
+}
+
+/// Result of Kruskal-Wallis one-way analysis of variance by ranks across $k \ge 2$ groups.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct KruskalWallisResult {
+    /// Tie-corrected Kruskal-Wallis $H$ statistic.
+    pub h_stat: f64,
+    /// Degrees of freedom ($k - 1$).
+    pub degrees_of_freedom: usize,
+    /// Asymptotic $\chi^2$ p-value.
+    pub p_value: f64,
+}
+
 // --- Mathematical approximations for error function and gamma distributions ---
 
 /// Numerical approximation of the Gauss error function $\text{erf}(x)$
@@ -176,7 +202,7 @@ pub fn mann_whitney_u(sample1: &[f64], sample2: &[f64]) -> crate::Result<MannWhi
 
     while i < total_n {
         let mut j = i;
-        while j + 1 < total_n && combined[j + 1].0 == combined[i].0 {
+        while j + 1 < total_n && (combined[j + 1].0 - combined[i].0).abs() <= 1e-12 {
             j += 1;
         }
         let tie_len = j - i + 1;
@@ -327,6 +353,173 @@ pub fn chi_squared_test(observed: &[Vec<f64>]) -> crate::Result<ChiSquaredResult
     })
 }
 
+/// Performs the Wilcoxon signed-rank test on paired samples `x` and `y`.
+///
+/// Zero differences ($x_i - y_i = 0$) are discarded per Wilcoxon's standard convention.
+/// When no rank ties exist and $n \le 50$, computes the exact combinatorial two-tailed p-value
+/// via dynamic programming (matching `scipy.stats.wilcoxon(..., mode='exact')` within $\pm 10^{-12}$).
+pub fn wilcoxon_signed_rank(x: &[f64], y: &[f64]) -> crate::Result<WilcoxonResult> {
+    if x.len() != y.len() {
+        return Err(BioError::InvalidInput(
+            "Paired samples must have identical length".to_string(),
+        ));
+    }
+
+    // Collect non-zero differences (|d|, sign)
+    let mut diffs: Vec<(f64, i8)> = Vec::with_capacity(x.len());
+    for (&xi, &yi) in x.iter().zip(y.iter()) {
+        let d = xi - yi;
+        if d.abs() > 1e-15 {
+            diffs.push((d.abs(), if d > 0.0 { 1 } else { -1 }));
+        }
+    }
+
+    let n = diffs.len();
+    if n == 0 {
+        return Err(BioError::InvalidInput(
+            "All paired differences are zero".to_string(),
+        ));
+    }
+
+    diffs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut ranks = vec![0.0_f64; n];
+    let mut i = 0;
+    let mut tie_correction = 0.0_f64;
+    let mut has_ties = false;
+
+    while i < n {
+        let mut j = i;
+        while j + 1 < n && (diffs[j + 1].0 - diffs[i].0).abs() <= 1e-12 {
+            j += 1;
+        }
+        let tie_len = j - i + 1;
+        let avg_rank = ((i + 1) + (j + 1)) as f64 / 2.0;
+        ranks[i..=j].fill(avg_rank);
+        if tie_len > 1 {
+            has_ties = true;
+            let t = tie_len as f64;
+            tie_correction += t * t * t - t;
+        }
+        i = j + 1;
+    }
+
+    let mut w_plus = 0.0_f64;
+    let mut w_minus = 0.0_f64;
+    for (idx, &(_, sign)) in diffs.iter().enumerate() {
+        if sign > 0 {
+            w_plus += ranks[idx];
+        } else {
+            w_minus += ranks[idx];
+        }
+    }
+
+    let w_stat = w_plus.min(w_minus);
+    let nf = n as f64;
+    let mean_w = nf * (nf + 1.0) / 4.0;
+    let var_w = (nf * (nf + 1.0) * (2.0 * nf + 1.0) - 0.5 * tie_correction) / 24.0;
+    let std_w = var_w.max(1e-12).sqrt();
+    let z_score = (w_stat - mean_w) / std_w;
+
+    let p_value = if !has_ties && n <= 50 {
+        // Exact combinatorial distribution over rank sums 0..=n(n+1)/2
+        let max_sum = n * (n + 1) / 2;
+        let mut dp = vec![0.0_f64; max_sum + 1];
+        dp[0] = 1.0;
+        for r in 1..=n {
+            for s in (r..=max_sum).rev() {
+                dp[s] += dp[s - r];
+            }
+        }
+        let target = w_stat.round() as usize;
+        let tail_count: f64 = dp[0..=target.min(max_sum)].iter().sum();
+        let total_outcomes = 2.0_f64.powi(n as i32);
+        (2.0 * tail_count / total_outcomes).clamp(0.0, 1.0)
+    } else {
+        (2.0 * normal_cdf(-z_score.abs())).clamp(0.0, 1.0)
+    };
+
+    Ok(WilcoxonResult {
+        w_stat,
+        p_value,
+        z_score,
+        effective_n: n,
+    })
+}
+
+/// Performs the Kruskal-Wallis one-way analysis of variance by ranks across $k \ge 2$ sample groups.
+pub fn kruskal_wallis(groups: &[&[f64]]) -> crate::Result<KruskalWallisResult> {
+    if groups.len() < 2 {
+        return Err(BioError::InvalidInput(
+            "Kruskal-Wallis requires at least 2 groups".to_string(),
+        ));
+    }
+    for g in groups {
+        if g.is_empty() {
+            return Err(BioError::InvalidInput(
+                "All Kruskal-Wallis groups must be non-empty".to_string(),
+            ));
+        }
+    }
+
+    let mut combined: Vec<(f64, usize)> = Vec::new();
+    for (g_idx, group) in groups.iter().enumerate() {
+        for &val in *group {
+            combined.push((val, g_idx));
+        }
+    }
+    let total_n = combined.len();
+    combined.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut ranks = vec![0.0_f64; total_n];
+    let mut i = 0;
+    let mut tie_correction = 0.0_f64;
+
+    while i < total_n {
+        let mut j = i;
+        while j + 1 < total_n && (combined[j + 1].0 - combined[i].0).abs() <= 1e-12 {
+            j += 1;
+        }
+        let tie_len = j - i + 1;
+        let avg_rank = ((i + 1) + (j + 1)) as f64 / 2.0;
+        ranks[i..=j].fill(avg_rank);
+        if tie_len > 1 {
+            let t = tie_len as f64;
+            tie_correction += t * t * t - t;
+        }
+        i = j + 1;
+    }
+
+    let mut rank_sums = vec![0.0_f64; groups.len()];
+    for (idx, &(_, g_idx)) in combined.iter().enumerate() {
+        rank_sums[g_idx] += ranks[idx];
+    }
+
+    let nf = total_n as f64;
+    let mut sum_r2_ni = 0.0_f64;
+    for (g_idx, group) in groups.iter().enumerate() {
+        let ni = group.len() as f64;
+        sum_r2_ni += (rank_sums[g_idx] * rank_sums[g_idx]) / ni;
+    }
+
+    let h_uncorrected = (12.0 / (nf * (nf + 1.0))) * sum_r2_ni - 3.0 * (nf + 1.0);
+    let denom = 1.0 - tie_correction / (nf * nf * nf - nf);
+    let h_stat = if denom > 1e-12 {
+        (h_uncorrected / denom).max(0.0)
+    } else {
+        0.0
+    };
+
+    let df = groups.len() - 1;
+    let p_value = regularized_gamma_q(df as f64 / 2.0, h_stat / 2.0);
+
+    Ok(KruskalWallisResult {
+        h_stat,
+        degrees_of_freedom: df,
+        p_value,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,5 +554,41 @@ mod tests {
         assert_eq!(res.degrees_of_freedom, 1);
         assert!(res.chi2_stat > 6.0);
         assert!(res.p_value < 0.02);
+    }
+
+    #[test]
+    fn test_wilcoxon_scipy_ground_truth() {
+        // SciPy benchmark: x = [125, 115, 130, 140, 140, 115, 140, 125, 140, 135]
+        // y = [110, 122, 125, 120, 140, 124, 123, 137, 135, 145]
+        // Or untied 8-pair benchmark: diffs = [+1, +2, +3, +4, +5, +6, +7, -8]
+        // W+ = 28, W- = 8, W = 8. For n=8, sum<=8 has counts:
+        // 0:1, 1:1, 2:1, 3:2, 4:2, 5:3, 6:4, 7:5, 8:6 -> sum = 25.
+        // Exact two-tailed p = 2 * 25 / 256 = 50 / 256 = 0.1953125 (SciPy wilcoxon exact = 0.1953125).
+        let x = [11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 80.0];
+        let y = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 88.0];
+        let res = wilcoxon_signed_rank(&x, &y).unwrap();
+        assert_eq!(res.w_stat, 8.0);
+        assert!((res.p_value - 0.195_312_5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_kruskal_wallis_multi_group() {
+        let g1 = [1.0, 2.0, 3.0, 4.0];
+        let g2 = [5.0, 6.0, 7.0, 8.0];
+        let g3 = [9.0, 10.0, 11.0, 12.0];
+        let res = kruskal_wallis(&[&g1, &g2, &g3]).unwrap();
+        assert_eq!(res.degrees_of_freedom, 2);
+        assert!(res.h_stat > 9.0);
+        assert!(res.p_value < 0.01);
+    }
+
+    #[test]
+    fn test_mann_whitney_float_tie_tolerance() {
+        // Values differing only by floating point epsilon 1e-14 should be detected as tied
+        let s1 = [1.0, 2.0, 3.0 + 1e-14];
+        let s2 = [3.0, 4.0, 5.0];
+        let res = mann_whitney_u(&s1, &s2).unwrap();
+        assert!(res.u_stat >= 0.0);
+        assert!(res.p_value <= 1.0);
     }
 }

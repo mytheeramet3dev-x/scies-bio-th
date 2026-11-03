@@ -30,6 +30,8 @@ pub struct CellPopulationState {
     pub cumulative_oncogenic_risk: f64,
     /// Shelterin protein complex capping integrity index ($0.0$ to $1.0$).
     pub shelterin_capping: f64,
+    /// Relative tissue cellularity / carrying capacity fraction ($0.0$ to $1.0$, $< 0.5$ = aplasia).
+    pub tissue_cellularity: f64,
 }
 
 /// Configuration parameters for multi-generation population simulation.
@@ -134,6 +136,7 @@ pub fn run_multi_generation_simulation(
     let mut fraction_transformed = 0.00_f64;
     let mut cumulative_risk = 0.005_f64;
     let mut shelterin = (current_length / 10_000.0).clamp(0.20, 0.98);
+    let mut tissue_cellularity = 1.0_f64;
 
     history.push(CellPopulationState {
         generation: 0,
@@ -144,6 +147,7 @@ pub fn run_multi_generation_simulation(
         fraction_transformed,
         cumulative_oncogenic_risk: cumulative_risk,
         shelterin_capping: shelterin,
+        tissue_cellularity,
     });
 
     let basal_attrition = 55.0_f64;
@@ -161,10 +165,16 @@ pub fn run_multi_generation_simulation(
         let capping_buffer = (1.0 / shelterin.clamp(0.25, 1.0)).min(2.5);
         let loss = basal_attrition * ox_factor * g4_factor * capping_buffer;
 
-        // 2. Telomerase renewal dynamics
+        // 2. Telomerase renewal dynamics (POT1/TRF1 length-dependent recruitment feedback)
+        // Shorter telomeres (< 10,000 bp) have open 3' overhangs that strongly recruit telomerase;
+        // hyper-elongated telomeres (> 12,000 bp) sterically inhibit recruitment via dense shelterin.
         let gain = if config.telomerase_expression > 0.01 {
-            let accessibility = (1.1 - shelterin).clamp(0.25, 0.95);
-            config.telomerase_expression * config.telomerase_processivity * accessibility
+            let homeostatic_accessibility = ((14_500.0 - current_length) / 8_500.0).clamp(0.25, 0.98);
+            let s_phase_recruitment_events = 3.2_f64;
+            config.telomerase_expression
+                * config.telomerase_processivity
+                * s_phase_recruitment_events
+                * homeostatic_accessibility
         } else {
             0.0
         };
@@ -188,12 +198,18 @@ pub fn run_multi_generation_simulation(
             fraction_senescent += newly_senescent;
         }
 
-        // Senolytic clearance
+        // Senolytic clearance & regenerative replacement check
         if config.senolytic_clearance_rate > 0.0 {
             let cleared = fraction_senescent * config.senolytic_clearance_rate;
             fraction_senescent -= cleared;
-            // Space reclaimed by proliferating healthy cells
-            fraction_proliferating += cleared * 0.85;
+            // Proliferating cells can only divide to reclaim cleared niche space if above Hayflick limit
+            if current_length > config.critical_hayflick_limit_bp {
+                fraction_proliferating += cleared * 0.85;
+                tissue_cellularity = (tissue_cellularity + 0.01).min(1.0);
+            } else {
+                // Critically short telomeres cannot regenerate cleared senescent cells -> tissue aplasia
+                tissue_cellularity = (tissue_cellularity - cleared * 0.85).clamp(0.05, 1.0);
+            }
         }
 
         // Transformation hazard
@@ -210,21 +226,32 @@ pub fn run_multi_generation_simulation(
             }
         }
 
-        // Renormalize fractions
+        // Renormalize relative compartment fractions
         let total = (fraction_proliferating + fraction_senescent + fraction_transformed).max(0.001);
         fraction_proliferating /= total;
         fraction_senescent /= total;
         fraction_transformed /= total;
 
-        // Biological age progression: 1 division ~ 0.2 chronological years drift
-        let age_drift = 0.20;
-        let telomere_benefit = if net_change > 0.0 { (net_change / 60.0) * 0.15 } else { 0.0 };
-        current_age = (current_age + age_drift - telomere_benefit).max(18.0);
+        // Biological age progression: rejuvenates when telomeres are actively restored and senescent burden is low
+        let age_drift = 0.15;
+        let telomere_rejuvenation = if net_change > 0.0 {
+            (net_change / 45.0).min(0.65)
+        } else if current_length >= 7_000.0 && config.telomerase_expression > 0.5 {
+            0.22
+        } else {
+            0.0
+        };
+        let senolytic_benefit = if config.senolytic_clearance_rate >= 0.08 && current_length > config.critical_hayflick_limit_bp {
+            0.12
+        } else {
+            0.0
+        };
+        current_age = (current_age + age_drift - telomere_rejuvenation - senolytic_benefit).clamp(21.0, 120.0);
 
         if fraction_transformed > 0.05 {
             crisis_alarm = true;
         }
-        if fraction_proliferating > 0.10 {
+        if fraction_proliferating > 0.10 && tissue_cellularity >= 0.50 && current_length > 2_000.0 {
             doublings += 1;
         }
 
@@ -237,11 +264,15 @@ pub fn run_multi_generation_simulation(
             fraction_transformed,
             cumulative_oncogenic_risk: cumulative_risk,
             shelterin_capping: shelterin,
+            tissue_cellularity,
         });
     }
 
     let final_state = history.last().unwrap().clone();
-    let is_viable = final_state.fraction_proliferating >= 0.50 && !crisis_alarm;
+    let is_viable = final_state.fraction_proliferating >= 0.50
+        && final_state.tissue_cellularity >= 0.60
+        && final_state.mean_telomere_length_bp > config.critical_hayflick_limit_bp
+        && !crisis_alarm;
 
     SimulationTrajectory {
         history,

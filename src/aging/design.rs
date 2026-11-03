@@ -13,10 +13,12 @@ use crate::aging::guide::{design_real_guides, select_optimal_guide};
 use crate::aging::pathways::find_longevity_gene;
 use crate::aging::report::{
     HighFidelityDesignReport, HighFidelityProposedEdit, LongevityMetricsComparison,
+    SequenceProvenance,
 };
 use crate::aging::risk::{evaluate_oncogenic_risk, SafetyLocks};
 use crate::aging::simulation::{run_multi_generation_simulation, MultiGenerationSimulationConfig};
 use crate::aging::telomerase::{apply_telomerase, TelomeraseActivity};
+use crate::aging::telomere::predict_replicative_lifespan;
 use crate::edit::crispr::{generate_sgrna_candidates, SgRnaCandidate};
 use crate::edit::offtarget::calculate_cfd_score;
 use crate::genome::Strand;
@@ -139,6 +141,34 @@ impl LongevityDesignReport {
     }
 }
 
+/// Computes projected healthy lifespan extension (%) from physiological age rejuvenation,
+/// replicative Hayflick division gain, DNA repair/senolytic pathway coverage, and net oncogenic risk.
+///
+/// Replaces static strategy constants so the projection responds dynamically to subject baseline
+/// parameters, telomerase kinetics, and off-target hazard penalties.
+fn compute_projected_lifespan_extension_percent(
+    baseline_bio_age: f64,
+    projected_bio_age: f64,
+    baseline_hayflick: u32,
+    projected_hayflick: u32,
+    dna_repair_and_protective_edits: usize,
+    senolytic_active: bool,
+    net_oncogenic_risk: f64,
+) -> f64 {
+    // Normalized against reference 80-year human healthspan so absolute years of age reversal scale proportionally
+    let age_rejuvenation_pct = ((baseline_bio_age - projected_bio_age).max(0.0) / 80.0) * 100.0;
+    // Normalized against canonical Hayflick & Moorhead (1961) human diploid fibroblast limit (60 divisions)
+    let hayflick_gain_pct =
+        ((projected_hayflick.saturating_sub(baseline_hayflick)) as f64 / 60.0) * 65.0;
+    let pathway_resilience_pct = (dna_repair_and_protective_edits as f64 * 6.5)
+        + if senolytic_active { 8.0 } else { 0.0 };
+    let oncogenic_penalty_pct = net_oncogenic_risk * 25.0;
+
+    (0.95 * age_rejuvenation_pct + 0.65 * hayflick_gain_pct + pathway_resilience_pct
+        - oncogenic_penalty_pct)
+        .clamp(0.0, 200.0)
+}
+
 /// Executes the full synthetic genome design pipeline for longevity.
 pub fn design_immortal_genome_package(
     baseline: &AgingProfile,
@@ -157,7 +187,7 @@ pub fn design_immortal_genome_package(
                     target_gene: gene.symbol.to_string(),
                     edit_type: EditType::PromoterActivation,
                     genomic_chrom: gene.chromosome.to_string(),
-                    genomic_pos: 12_450_000,
+                    genomic_pos: 124_929_500,
                     target_dna,
                     rationale: gene.rationale.to_string(),
                     priority: 2,
@@ -176,7 +206,7 @@ pub fn design_immortal_genome_package(
                     target_gene: gene.symbol.to_string(),
                     edit_type: EditType::PromoterActivation,
                     genomic_chrom: gene.chromosome.to_string(),
-                    genomic_pos: 1_295_000,
+                    genomic_pos: 1_295_104,
                     target_dna,
                     rationale: gene.rationale.to_string(),
                     priority: 1,
@@ -195,7 +225,7 @@ pub fn design_immortal_genome_package(
             target_gene: gene.symbol.to_string(),
             edit_type: EditType::EnhanceDnaRepair,
             genomic_chrom: gene.chromosome.to_string(),
-            genomic_pos: 4_170_000,
+            genomic_pos: 4_182_500,
             target_dna,
             rationale: gene.rationale.to_string(),
             priority: 1,
@@ -212,7 +242,7 @@ pub fn design_immortal_genome_package(
             target_gene: gene.symbol.to_string(),
             edit_type: EditType::ProtectiveVariantKnockIn,
             genomic_chrom: gene.chromosome.to_string(),
-            genomic_pos: 108_560_000,
+            genomic_pos: 108_559_652,
             target_dna,
             rationale: gene.rationale.to_string(),
             priority: 2,
@@ -230,7 +260,7 @@ pub fn design_immortal_genome_package(
                 target_gene: gene.symbol.to_string(),
                 edit_type: EditType::TumorSuppressorEnhancement,
                 genomic_chrom: gene.chromosome.to_string(),
-                genomic_pos: 7_668_000,
+                genomic_pos: 7_687_400,
                 target_dna,
                 rationale: "Elephant-derived Super-p53 dosage safeguard preventing malignant transformation.".to_string(),
                 priority: 1,
@@ -248,7 +278,7 @@ pub fn design_immortal_genome_package(
                 target_gene: gene.symbol.to_string(),
                 edit_type: EditType::SenescenceClearance,
                 genomic_chrom: gene.chromosome.to_string(),
-                genomic_pos: 21_967_000,
+                genomic_pos: 21_974_800,
                 target_dna,
                 rationale: gene.rationale.to_string(),
                 priority: 3,
@@ -267,28 +297,39 @@ pub fn design_immortal_genome_package(
         }
     }
 
-    // 6. Project Rejuvenated Aging Profile
+    // 6. Project Rejuvenated Aging Profile & Compute Risk + Lifespan Extension Dynamically
     let mut projected_telomere = baseline.telomere.clone();
-    let (telomerase_activity, lifespan_extension, oncogenic_risk) = match strategy {
+    let (telomerase_activity, shelterin_capping, safeguards) = match strategy {
         LongevityStrategy::Conservative => (
             TelomeraseActivity::somatic_silenced(),
-            28.0, // +28% lifespan extension
-            0.03, // Very low oncogenic risk
+            0.94,
+            SafetyLocks {
+                super_p53_active: false,
+                inducible_suicide_switch: false,
+                high_fidelity_nuclease: true,
+                cell_cycle_restriction: true,
+            },
         ),
         LongevityStrategy::Balanced => (
             TelomeraseActivity::synthetic_enhanced(true),
-            65.0, // +65% lifespan extension
-            0.08, // Low controlled oncogenic risk with dual p53
+            0.88,
+            SafetyLocks::standard_protection(),
         ),
         LongevityStrategy::Aggressive => (
             TelomeraseActivity::synthetic_enhanced(false),
-            120.0, // +120% lifespan extension
-            0.24,  // Moderate elevated oncogenic risk
+            0.74,
+            SafetyLocks {
+                super_p53_active: proposed_edits.iter().any(|e| e.target_gene == "TP53"),
+                inducible_suicide_switch: false,
+                high_fidelity_nuclease: false,
+                cell_cycle_restriction: false,
+            },
         ),
     };
 
     if telomerase_activity.active {
-        apply_telomerase(&mut projected_telomere, &telomerase_activity, 40);
+        let cycles = if telomerase_activity.safety_lock_present { 40 } else { 55 };
+        apply_telomerase(&mut projected_telomere, &telomerase_activity, cycles);
     }
 
     let projected_methylation = (0.20_f64).min(baseline.chronological_age_years * 0.004);
@@ -296,6 +337,45 @@ pub fn design_immortal_genome_package(
         baseline.chronological_age_years,
         projected_methylation,
         projected_telomere.current_length_bp,
+    );
+
+    let offtarget_fractions: Vec<f64> = proposed_edits
+        .iter()
+        .map(|e| e.estimated_offtarget_risk / 100.0)
+        .collect();
+    let telomerase_expr = if telomerase_activity.active {
+        telomerase_activity.expression_level
+    } else {
+        0.0
+    };
+    let oncogenic_risk = evaluate_oncogenic_risk(
+        telomerase_expr,
+        &offtarget_fractions,
+        shelterin_capping,
+        &safeguards,
+    )
+    .net_risk_index;
+
+    let repair_edits = proposed_edits
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.edit_type,
+                EditType::EnhanceDnaRepair | EditType::ProtectiveVariantKnockIn
+            )
+        })
+        .count();
+    let senolytic_active = proposed_edits
+        .iter()
+        .any(|e| e.edit_type == EditType::SenescenceClearance);
+    let lifespan_extension = compute_projected_lifespan_extension_percent(
+        baseline.biological_age_years,
+        projected_bio_age,
+        predict_replicative_lifespan(&baseline.telomere),
+        predict_replicative_lifespan(&projected_telomere),
+        repair_edits,
+        senolytic_active,
+        oncogenic_risk,
     );
 
     let projected_profile = AgingProfile {
@@ -323,13 +403,16 @@ pub fn design_high_fidelity_longevity_package(
     strategy: LongevityStrategy,
     custom_loci: Option<&[(&str, &Dna)]>,
 ) -> HighFidelityDesignReport {
-    let get_target_seq = |gene_symbol: &str, default_seq: &[u8]| -> Dna {
+    let get_target_seq = |gene_symbol: &str, default_seq: &[u8]| -> (Dna, SequenceProvenance) {
         if let Some(loci) = custom_loci {
             if let Some((_, dna)) = loci.iter().find(|(sym, _)| sym.eq_ignore_ascii_case(gene_symbol)) {
-                return (*dna).clone();
+                return ((*dna).clone(), SequenceProvenance::RealReference);
             }
         }
-        Dna::new(default_seq).unwrap()
+        (
+            Dna::new(default_seq).unwrap(),
+            SequenceProvenance::SyntheticPlaceholder,
+        )
     };
 
     let build_edit = |gene_symbol: &str,
@@ -343,7 +426,7 @@ pub fn design_high_fidelity_longevity_package(
                       priority: u8,
                       execution_step: u8|
      -> HighFidelityProposedEdit {
-        let target_sequence = get_target_seq(gene_symbol, default_dna);
+        let (target_sequence, sequence_provenance) = get_target_seq(gene_symbol, default_dna);
         let candidates = design_real_guides(&target_sequence, strand, start_pos);
         let best_guide = select_optimal_guide(&candidates);
 
@@ -355,6 +438,7 @@ pub fn design_high_fidelity_longevity_package(
         };
 
         HighFidelityProposedEdit {
+            sequence_provenance,
             target_gene: gene_symbol.to_string(),
             edit_type,
             chromosome: default_chrom.to_string(),
@@ -380,22 +464,22 @@ pub fn design_high_fidelity_longevity_package(
                 "TP53",
                 EditType::TumorSuppressorEnhancement,
                 "chr17",
-                7_668_402,
-                7_668_460,
-                Strand::Forward,
+                7_687_001,
+                7_688_000,
+                Strand::Reverse,
                 b"AAGTCGATCGATCGATCGATCGGGTCAAGTCGATC",
                 "Elephant-derived Super-p53 tandem safeguard preventing malignant transformation.",
                 1,
                 1,
             ));
-            // Telomere Capping: POT1
+            // Telomere Capping: POT1 (GRCh38 chr7:124929401-124930200)
             proposed_edits.push(build_edit(
                 "POT1",
                 EditType::PromoterActivation,
                 "chr7",
-                12_487_000,
-                12_487_060,
-                Strand::Forward,
+                124_929_401,
+                124_930_200,
+                Strand::Reverse,
                 b"ATGCGATCGATCGATCGATCGGGCATCGATCGATC",
                 "Shelterin complex stabilization and single-stranded overhang capping.",
                 1,
@@ -406,9 +490,9 @@ pub fn design_high_fidelity_longevity_package(
                 "SIRT6",
                 EditType::EnhanceDnaRepair,
                 "chr19",
-                4_170_240,
-                4_170_300,
-                Strand::Forward,
+                4_182_001,
+                4_182_800,
+                Strand::Reverse,
                 b"CGATCGATCGATCGATCGATCGGGCGATCGATCGAT",
                 "Enhances homologous recombination DSB repair without ectopic telomerase risk.",
                 2,
@@ -419,8 +503,8 @@ pub fn design_high_fidelity_longevity_package(
                 "FOXO3",
                 EditType::ProtectiveVariantKnockIn,
                 "chr6",
-                108_560_000,
-                108_560_060,
+                108_559_501,
+                108_560_300,
                 Strand::Forward,
                 b"TTGCAATCGATCGATCGATCGGGATCGATCGATCG",
                 "Centenarian protective G-allele (rs2802292) knock-in driving antioxidant defenses.",
@@ -432,8 +516,8 @@ pub fn design_high_fidelity_longevity_package(
                 "LMNA",
                 EditType::EnhanceDnaRepair,
                 "chr1",
-                156_108_500,
-                156_108_560,
+                156_138_201,
+                156_139_000,
                 Strand::Forward,
                 b"CCGTAGCTAGCTAGCTAGCTCGGGTAGCTAGCTAG",
                 "Progerin cryptic splice suppression maintaining nuclear lamina structural integrity.",
@@ -447,9 +531,9 @@ pub fn design_high_fidelity_longevity_package(
                 "TP53",
                 EditType::TumorSuppressorEnhancement,
                 "chr17",
-                7_668_402,
-                7_668_460,
-                Strand::Forward,
+                7_687_001,
+                7_688_000,
+                Strand::Reverse,
                 b"AAGTCGATCGATCGATCGATCGGGTCAAGTCGATC",
                 "Elephant-derived Super-p53 tandem safeguard.",
                 1,
@@ -459,9 +543,9 @@ pub fn design_high_fidelity_longevity_package(
                 "CDKN2A",
                 EditType::SenescenceClearance,
                 "chr9",
-                21_967_750,
-                21_967_810,
-                Strand::Forward,
+                21_974_401,
+                21_975_400,
+                Strand::Reverse,
                 b"CCGTAGCTAGCTAGCTAGCTCGGGTAGCTAGCTAG",
                 "Inducible senolytic suicide cassette (p16INK4a-driven caspase).",
                 1,
@@ -472,8 +556,8 @@ pub fn design_high_fidelity_longevity_package(
                 "TERT",
                 EditType::PromoterActivation,
                 "chr5",
-                1_295_105,
-                1_295_160,
+                1_294_801,
+                1_295_600,
                 Strand::Reverse,
                 b"GCTAGCGATCGATCGATCGATCGGGCATCGATGCT",
                 "Regulated inducible telomerase reactivation overcoming replicative senescence.",
@@ -485,9 +569,9 @@ pub fn design_high_fidelity_longevity_package(
                 "SIRT6",
                 EditType::EnhanceDnaRepair,
                 "chr19",
-                4_170_240,
-                4_170_300,
-                Strand::Forward,
+                4_182_001,
+                4_182_800,
+                Strand::Reverse,
                 b"CGATCGATCGATCGATCGATCGGGCGATCGATCGAT",
                 "H3K9/H3K56 deacetylation & double-strand break repair enhancement.",
                 1,
@@ -497,9 +581,9 @@ pub fn design_high_fidelity_longevity_package(
                 "PARP1",
                 EditType::EnhanceDnaRepair,
                 "chr1",
-                226_360_000,
-                226_360_060,
-                Strand::Forward,
+                226_407_601,
+                226_408_400,
+                Strand::Reverse,
                 b"ATGCGATCGATCGATCGATCGGGCATCGATCGATC",
                 "Single-strand break repair tuning and cellular NAD+ conservation.",
                 2,
@@ -510,8 +594,8 @@ pub fn design_high_fidelity_longevity_package(
                 "FOXO3",
                 EditType::ProtectiveVariantKnockIn,
                 "chr6",
-                108_560_000,
-                108_560_060,
+                108_559_501,
+                108_560_300,
                 Strand::Forward,
                 b"TTGCAATCGATCGATCGATCGGGATCGATCGATCG",
                 "Centenarian protective longevity variant knock-in.",
@@ -524,9 +608,9 @@ pub fn design_high_fidelity_longevity_package(
                 "TP53",
                 EditType::TumorSuppressorEnhancement,
                 "chr17",
-                7_668_402,
-                7_668_460,
-                Strand::Forward,
+                7_687_001,
+                7_688_000,
+                Strand::Reverse,
                 b"AAGTCGATCGATCGATCGATCGGGTCAAGTCGATC",
                 "Pachyderm Super-p53 safeguard.",
                 1,
@@ -536,8 +620,8 @@ pub fn design_high_fidelity_longevity_package(
                 "TERT",
                 EditType::PromoterActivation,
                 "chr5",
-                1_295_105,
-                1_295_160,
+                1_294_801,
+                1_295_600,
                 Strand::Reverse,
                 b"GCTAGCGATCGATCGATCGATCGGGCATCGATGCT",
                 "Maximal telomerase reverse transcriptase reactivation.",
@@ -548,9 +632,9 @@ pub fn design_high_fidelity_longevity_package(
                 "TERC",
                 EditType::PromoterActivation,
                 "chr3",
-                169_764_500,
-                169_764_560,
-                Strand::Forward,
+                169_764_401,
+                169_765_200,
+                Strand::Reverse,
                 b"TTGCAATCGATCGATCGATCGGGATCGATCGATCG",
                 "Telomerase RNA component overexpression for repeat elongation.",
                 1,
@@ -560,9 +644,9 @@ pub fn design_high_fidelity_longevity_package(
                 "SIRT6",
                 EditType::EnhanceDnaRepair,
                 "chr19",
-                4_170_240,
-                4_170_300,
-                Strand::Forward,
+                4_182_001,
+                4_182_800,
+                Strand::Reverse,
                 b"CGATCGATCGATCGATCGATCGGGCGATCGATCGAT",
                 "Maximal chromatin stabilization and DNA double-strand repair.",
                 1,
@@ -572,8 +656,8 @@ pub fn design_high_fidelity_longevity_package(
                 "ATM",
                 EditType::EnhanceDnaRepair,
                 "chr11",
-                108_223_000,
-                108_223_060,
+                108_222_601,
+                108_223_400,
                 Strand::Forward,
                 b"ATGCGATCGATCGATCGATCGGGCATCGATCGATC",
                 "Ataxia Telangiectasia Mutated kinase signaling calibration.",
@@ -584,9 +668,9 @@ pub fn design_high_fidelity_longevity_package(
                 "CDKN2A",
                 EditType::SenescenceClearance,
                 "chr9",
-                21_967_750,
-                21_967_810,
-                Strand::Forward,
+                21_974_401,
+                21_975_400,
+                Strand::Reverse,
                 b"CCGTAGCTAGCTAGCTAGCTCGGGTAGCTAGCTAG",
                 "Aggressive senolytic caspase induction ablating SASP.",
                 2,
@@ -596,9 +680,9 @@ pub fn design_high_fidelity_longevity_package(
                 "MTOR",
                 EditType::ProtectiveVariantKnockIn,
                 "chr1",
-                11_106_500,
-                11_106_560,
-                Strand::Forward,
+                11_262_001,
+                11_262_800,
+                Strand::Reverse,
                 b"GCTAGCGATCGATCGATCGATCGGGCATCGATGCT",
                 "Downregulated basal mTORC1 activity promoting macroautophagy.",
                 3,
@@ -613,11 +697,10 @@ pub fn design_high_fidelity_longevity_package(
     let baseline_hayflick = baseline_telomere.replicative_lifespan();
 
     // Telomerase simulation & projections
-    let (telomerase_level, lifespan_extension, projected_telomere_len, projected_capping, projected_hayflick) =
+    let (telomerase_level, projected_telomere_len, projected_capping, projected_hayflick) =
         match strategy {
             LongevityStrategy::Conservative => (
                 0.0,
-                32.0,
                 subject.telomere_length_bp,
                 (baseline_telomere.shelterin_capping + 0.05).min(0.98),
                 baseline_hayflick,
@@ -627,14 +710,14 @@ pub fn design_high_fidelity_longevity_package(
                 let kinetics = TelomeraseKinetics::standard_human();
                 apply_high_fidelity_telomerase(&mut state, &kinetics, 0.80, 35);
                 let hayflick = state.replicative_lifespan();
-                (0.80, 68.0, state.current_length_bp, state.shelterin_capping, hayflick)
+                (0.80, state.current_length_bp, state.shelterin_capping, hayflick)
             }
             LongevityStrategy::Aggressive => {
                 let mut state = baseline_telomere.clone();
                 let kinetics = TelomeraseKinetics::engineered_hyper_processive();
                 apply_high_fidelity_telomerase(&mut state, &kinetics, 0.95, 50);
                 let hayflick = state.replicative_lifespan();
-                (0.95, 125.0, state.current_length_bp, state.shelterin_capping, hayflick)
+                (0.95, state.current_length_bp, state.shelterin_capping, hayflick)
             }
         };
 
@@ -680,6 +763,28 @@ pub fn design_high_fidelity_longevity_package(
         &offtarget_fractions,
         projected_capping,
         &safeguards,
+    );
+
+    let repair_edits = proposed_edits
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.edit_type,
+                EditType::EnhanceDnaRepair | EditType::ProtectiveVariantKnockIn
+            )
+        })
+        .count();
+    let senolytic_active = proposed_edits
+        .iter()
+        .any(|e| e.edit_type == EditType::SenescenceClearance);
+    let lifespan_extension = compute_projected_lifespan_extension_percent(
+        baseline_age_result.composite_biological_age,
+        projected_age_result.composite_biological_age,
+        baseline_hayflick,
+        projected_hayflick,
+        repair_edits,
+        senolytic_active,
+        oncogenic_risk.net_risk_index,
     );
 
     // Multi-generation cell population simulation (50 generations)
@@ -732,6 +837,85 @@ pub fn design_high_fidelity_longevity_package(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn load_testdata_locus(file: &str) -> Dna {
+        let path = format!("{}/testdata/{}", env!("CARGO_MANIFEST_DIR"), file);
+        let text = std::fs::read_to_string(&path).expect("testdata FASTA present");
+        let seq: Vec<u8> = text
+            .lines()
+            .filter(|l| !l.starts_with('>'))
+            .flat_map(|l| l.trim().bytes())
+            .map(|b| b.to_ascii_uppercase())
+            .filter(|b| matches!(b, b'A' | b'C' | b'G' | b'T'))
+            .collect();
+        Dna::new(&seq).expect("valid ACGT locus")
+    }
+
+    fn subject() -> HighFidelityAgeParams {
+        HighFidelityAgeParams {
+            chronological_age: 55.0,
+            cpg_methylation_fraction: 0.48,
+            telomere_length_bp: 6_200.0,
+            gamma_h2ax_foci: 1.6,
+            sasp_burden: 0.35,
+        }
+    }
+
+    #[test]
+    fn test_provenance_is_flagged_when_no_real_loci_supplied() {
+        let report = design_high_fidelity_longevity_package(&subject(), LongevityStrategy::Balanced, None);
+        assert!(report
+            .proposed_edits
+            .iter()
+            .all(|e| e.sequence_provenance == SequenceProvenance::SyntheticPlaceholder));
+        let summary = report.export_detailed_summary();
+        assert!(summary.contains("SYNTHETIC PLACEHOLDER"));
+        assert!(!summary.contains("REAL reference locus"));
+    }
+
+    #[test]
+    fn test_real_fasta_loci_are_marked_real_and_only_for_supplied_genes() {
+        let sirt6 = load_testdata_locus("t2t_chr19_sirt6.fasta");
+        let tp53 = load_testdata_locus("t2t_chr17_tp53.fasta");
+        assert!(sirt6.sequence.len() > 500, "SIRT6 locus should be real-length, not a toy string");
+        let loci = [("SIRT6", &sirt6), ("TP53", &tp53)];
+
+        let report = design_high_fidelity_longevity_package(
+            &subject(),
+            LongevityStrategy::Balanced,
+            Some(&loci),
+        );
+        for edit in &report.proposed_edits {
+            let expected = if edit.target_gene == "SIRT6" || edit.target_gene == "TP53" {
+                SequenceProvenance::RealReference
+            } else {
+                SequenceProvenance::SyntheticPlaceholder
+            };
+            assert_eq!(edit.sequence_provenance, expected, "gene {}", edit.target_gene);
+        }
+        let sirt6_edit = report.proposed_edits.iter().find(|e| e.target_gene == "SIRT6").unwrap();
+        assert_eq!(sirt6_edit.target_sequence, sirt6);
+    }
+
+    #[test]
+    fn test_offtarget_score_is_computed_not_constant() {
+        // Different real loci must yield different guides/scores; a hardcoded value would be identical.
+        let sirt6 = load_testdata_locus("t2t_chr19_sirt6.fasta");
+        let tp53 = load_testdata_locus("t2t_chr17_tp53.fasta");
+        let loci = [("SIRT6", &sirt6), ("TP53", &tp53)];
+        let report = design_high_fidelity_longevity_package(
+            &subject(),
+            LongevityStrategy::Balanced,
+            Some(&loci),
+        );
+        let s = report.proposed_edits.iter().find(|e| e.target_gene == "SIRT6").unwrap();
+        let t = report.proposed_edits.iter().find(|e| e.target_gene == "TP53").unwrap();
+        assert!(s.recommended_sgrna.is_some() && t.recommended_sgrna.is_some());
+        assert_ne!(
+            s.recommended_sgrna.as_ref().unwrap().sequence,
+            t.recommended_sgrna.as_ref().unwrap().sequence
+        );
+    }
 
     #[test]
     fn test_design_immortal_genome_balanced_strategy() {
@@ -798,5 +982,51 @@ mod tests {
         let summary = report.export_detailed_summary();
         assert!(summary.contains("SCIES-BIO-TH HIGH-FIDELITY LONGEVITY GENOME DESIGN REPORT"));
         assert!(summary.contains("Sequential Intervention Workflow"));
+    }
+
+    #[test]
+    fn test_lifespan_extension_and_oncogenic_risk_respond_to_subject_state() {
+        let young_long_telomere = HighFidelityAgeParams {
+            chronological_age: 30.0,
+            cpg_methylation_fraction: 0.24,
+            telomere_length_bp: 11_200.0,
+            gamma_h2ax_foci: 0.4,
+            sasp_burden: 0.08,
+        };
+        let aged_depleted_telomere = HighFidelityAgeParams {
+            chronological_age: 72.0,
+            cpg_methylation_fraction: 0.68,
+            telomere_length_bp: 4_600.0,
+            gamma_h2ax_foci: 2.9,
+            sasp_burden: 0.58,
+        };
+
+        let rep_young = design_high_fidelity_longevity_package(
+            &young_long_telomere,
+            LongevityStrategy::Balanced,
+            None,
+        );
+        let rep_aged = design_high_fidelity_longevity_package(
+            &aged_depleted_telomere,
+            LongevityStrategy::Balanced,
+            None,
+        );
+
+        // Lifespan extension % and net oncogenic risk must NOT be hardcoded constants across subjects
+        assert!(
+            (rep_young.metrics.projected_lifespan_extension_percent
+                - rep_aged.metrics.projected_lifespan_extension_percent)
+                .abs()
+                > 10.0,
+            "Lifespan extension should respond to subject baseline state (young={:.2}%, aged={:.2}%)",
+            rep_young.metrics.projected_lifespan_extension_percent,
+            rep_aged.metrics.projected_lifespan_extension_percent
+        );
+        assert!(
+            (rep_young.oncogenic_risk.net_risk_index - rep_aged.oncogenic_risk.net_risk_index)
+                .abs()
+                > 1e-4,
+            "Oncogenic risk should vary with shelterin capping and telomere integrity"
+        );
     }
 }

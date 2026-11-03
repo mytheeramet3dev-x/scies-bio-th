@@ -1,6 +1,9 @@
 //! scies-bio-th — A high-performance bio toolkit for Rust.
 
+#[cfg(feature = "aging")]
 pub mod aging;
+#[cfg(feature = "aging")]
+pub mod anatomy;
 pub mod align;
 pub mod annotation;
 pub mod codon;
@@ -34,6 +37,24 @@ pub mod docking;
 
 #[cfg(feature = "epigenome")]
 pub mod epigenome;
+
+#[cfg(feature = "regulatory")]
+pub mod regulatory;
+
+#[cfg(feature = "multiomics")]
+pub mod multiomics;
+
+#[cfg(feature = "safety")]
+pub mod safety;
+
+#[cfg(feature = "imaging")]
+pub mod imaging;
+
+#[cfg(feature = "singlecell")]
+pub mod singlecell;
+
+#[cfg(feature = "pharma")]
+pub mod pharma;
 
 #[cfg(feature = "experimental")]
 pub mod ivg;

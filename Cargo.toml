@@ -1,6 +1,6 @@
 [package]
 name = "scies-bio-th"
-version = "0.7.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 description = "A high-performance, dependency-free bioinformatics toolkit for Rust."
@@ -20,8 +20,36 @@ network = []
 stats = []
 docking = ["structure"]
 epigenome = []
+regulatory = ["epigenome", "stats", "network"]
+multiomics = ["regulatory", "stats"]
+safety = ["stats"]
+singlecell = ["stats", "network", "multiomics"]
+pharma = ["stats"]
+aging = ["docking", "epigenome", "safety", "regulatory", "singlecell", "pharma"]
+imaging = []
 experimental = []
-full = ["structure", "network", "stats", "docking", "epigenome", "experimental"]
+full = [
+  "structure",
+  "network",
+  "stats",
+  "docking",
+  "epigenome",
+  "regulatory",
+  "multiomics",
+  "safety",
+  "singlecell",
+  "pharma",
+  "aging",
+  "imaging",
+]
+
+[[example]]
+name = "design_from_real_genome"
+required-features = ["aging"]
+
+[[example]]
+name = "design_immortal_genome"
+required-features = ["aging"]
 
 [dev-dependencies]
 criterion = "0.5"

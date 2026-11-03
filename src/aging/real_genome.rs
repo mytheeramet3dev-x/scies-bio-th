@@ -91,20 +91,25 @@ pub fn analyze_real_telomere(sequence: &Dna) -> TelomereAnalysis {
     let mut forward_variants = 0usize;
     let mut reverse_variants = 0usize;
 
-    // 1. Scan hexamers with step of 6 bp
+    // 1. Phase-tolerant hexamer scan (handles arbitrary 5' coordinate offsets)
     let mut i = 0;
     while i + 6 <= bytes.len() {
         let hex = &bytes[i..i + 6];
         if hex == CANONICAL_FORWARD_REPEAT {
             forward_canonical += 1;
+            i += 6;
         } else if hex == CANONICAL_REVERSE_REPEAT {
             reverse_canonical += 1;
+            i += 6;
         } else if FORWARD_VARIANT_REPEATS.contains(&hex) {
             forward_variants += 1;
+            i += 6;
         } else if REVERSE_VARIANT_REPEATS.contains(&hex) {
             reverse_variants += 1;
+            i += 6;
+        } else {
+            i += 1;
         }
-        i += 6;
     }
 
     let (canonical_count, variant_count) = if reverse_canonical >= forward_canonical {
@@ -117,12 +122,16 @@ pub fn analyze_real_telomere(sequence: &Dna) -> TelomereAnalysis {
     let total_telomeric_bp = (canonical_count + variant_count) * 6;
     let telomeric_density = (total_telomeric_bp as f64 / bytes.len() as f64).min(1.0);
 
-    // 2. Locate subtelomeric transition via sliding windows
+    // 2. Locate subtelomeric transition via phase-tolerant sliding windows.
+    // Tracks the last window where telomeric repeat density >= 0.35 so that brief 5'-cap
+    // degeneracy at the extreme chromosome tip (e.g. T2T-CHM13 chr5:1-200) does not mask
+    // a 2,000+ bp canonical telomere tract immediately following it.
     let mut subtelomeric_transition = bytes.len();
     let window_size = 30.min(bytes.len());
     if window_size >= 12 {
-        let mut pos = 0;
         let step = 6;
+        let mut pos = 0;
+        let mut window_densities = Vec::new();
         while pos + window_size <= bytes.len() {
             let win = &bytes[pos..pos + window_size];
             let mut win_telomeric = 0;
@@ -135,15 +144,27 @@ pub fn analyze_real_telomere(sequence: &Dna) -> TelomereAnalysis {
                     || REVERSE_VARIANT_REPEATS.contains(&h)
                 {
                     win_telomeric += 6;
+                    j += 6;
+                } else {
+                    j += 1;
                 }
-                j += 6;
             }
             let density = win_telomeric as f64 / win.len() as f64;
-            if density < 0.35 {
-                subtelomeric_transition = pos;
-                break;
-            }
+            window_densities.push((pos, density));
             pos += step;
+        }
+
+        // Find the first low-density window after which telomeric density never recovers >= 0.50
+        for idx in 0..window_densities.len() {
+            if window_densities[idx].1 < 0.35 {
+                let recovers_later = window_densities[idx + 1..]
+                    .iter()
+                    .any(|&(_, d)| d >= 0.50);
+                if !recovers_later {
+                    subtelomeric_transition = window_densities[idx].0;
+                    break;
+                }
+            }
         }
     }
 

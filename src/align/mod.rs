@@ -223,8 +223,8 @@ const NEG_INF: i32 = i32::MIN / 4;
 
 /// Banded Needleman-Wunsch global alignment with band radius `k`.
 ///
-/// Only evaluates dynamic programming matrix cells where $|i - j| \le k$.
-/// Complexity is reduced from $O(M \cdot N)$ to $O(k \cdot \min(M, N))$.
+/// Only evaluates and stores dynamic programming matrix cells where $|i - j| \le k$.
+/// Both time and space complexity are reduced from $O(N \cdot M)$ to $O(k \cdot N)$.
 pub fn banded_needleman_wunsch(
     seq1: &[u8],
     seq2: &[u8],
@@ -235,26 +235,38 @@ pub fn banded_needleman_wunsch(
 ) -> AlignmentResult {
     let n = seq1.len();
     let m = seq2.len();
-    let cols = m + 1;
-    let mut matrix = vec![NEG_INF; (n + 1) * cols];
+    let k_eff = k.max(n.abs_diff(m));
+    let band_width = 2 * k_eff + 1;
+    let k_s = k_eff as isize;
+    let mut band = vec![NEG_INF; (n + 1) * band_width];
 
-    matrix[0] = 0;
-    for i in 1..=(n.min(k)) {
-        matrix[i * cols] = i as i32 * gap_penalty;
-    }
-    for (j, cell) in matrix[..=(m.min(k))].iter_mut().enumerate().skip(1) {
-        *cell = j as i32 * gap_penalty;
-    }
+    let idx = |i: usize, j: usize| -> Option<usize> {
+        let offset = (j as isize) - (i as isize) + k_s;
+        if offset >= 0 && (offset as usize) < band_width {
+            Some(i * band_width + (offset as usize))
+        } else {
+            None
+        }
+    };
 
-    let k_signed = k as isize;
+    if let Some(pos) = idx(0, 0) {
+        band[pos] = 0;
+    }
+    for i in 1..=(n.min(k_eff)) {
+        if let Some(pos) = idx(i, 0) {
+            band[pos] = i as i32 * gap_penalty;
+        }
+    }
+    for j in 1..=(m.min(k_eff)) {
+        if let Some(pos) = idx(0, j) {
+            band[pos] = j as i32 * gap_penalty;
+        }
+    }
 
     for i in 1..=n {
         let i_s = i as isize;
-        let j_start = (i_s - k_signed).max(1) as usize;
-        let j_end = (i_s + k_signed).min(m as isize) as usize;
-
-        let row_offset = i * cols;
-        let prev_row_offset = (i - 1) * cols;
+        let j_start = (i_s - k_s).max(1) as usize;
+        let j_end = (i_s + k_s).min(m as isize) as usize;
 
         for j in j_start..=j_end {
             let match_mismatch = if seq1[i - 1] == seq2[j - 1] {
@@ -263,11 +275,19 @@ pub fn banded_needleman_wunsch(
                 mismatch_score
             };
 
-            let diag = matrix[prev_row_offset + j - 1] + match_mismatch;
-            let up = matrix[prev_row_offset + j] + gap_penalty;
-            let left = matrix[row_offset + j - 1] + gap_penalty;
+            let diag = idx(i - 1, j - 1)
+                .map(|p| band[p] + match_mismatch)
+                .unwrap_or(NEG_INF);
+            let up = idx(i - 1, j)
+                .map(|p| band[p] + gap_penalty)
+                .unwrap_or(NEG_INF);
+            let left = idx(i, j - 1)
+                .map(|p| band[p] + gap_penalty)
+                .unwrap_or(NEG_INF);
 
-            matrix[row_offset + j] = diag.max(up).max(left);
+            if let Some(curr) = idx(i, j) {
+                band[curr] = diag.max(up).max(left);
+            }
         }
     }
 
@@ -276,19 +296,18 @@ pub fn banded_needleman_wunsch(
     let mut align2 = Vec::new();
     let mut i = n;
     let mut j = m;
-    let score = matrix[n * cols + m];
+    let score = idx(n, m).map(|p| band[p]).unwrap_or(NEG_INF);
 
     while i > 0 || j > 0 {
-        let curr_offset = i * cols + j;
+        let current_score = idx(i, j).map(|p| band[p]).unwrap_or(NEG_INF);
         if i > 0 && j > 0 {
-            let current_score = matrix[curr_offset];
             let match_mismatch = if seq1[i - 1] == seq2[j - 1] {
                 match_score
             } else {
                 mismatch_score
             };
-
-            if current_score == matrix[(i - 1) * cols + (j - 1)] + match_mismatch {
+            let diag_score = idx(i - 1, j - 1).map(|p| band[p]).unwrap_or(NEG_INF);
+            if current_score == diag_score + match_mismatch {
                 align1.push(seq1[i - 1]);
                 align2.push(seq2[j - 1]);
                 i -= 1;
@@ -296,7 +315,12 @@ pub fn banded_needleman_wunsch(
                 continue;
             }
         }
-        if i > 0 && (j == 0 || matrix[curr_offset] == matrix[(i - 1) * cols + j] + gap_penalty) {
+        let up_score = if i > 0 {
+            idx(i - 1, j).map(|p| band[p]).unwrap_or(NEG_INF)
+        } else {
+            NEG_INF
+        };
+        if i > 0 && (j == 0 || current_score == up_score + gap_penalty) {
             align1.push(seq1[i - 1]);
             align2.push(b'-');
             i -= 1;
@@ -320,6 +344,8 @@ pub fn banded_needleman_wunsch(
 }
 
 /// Banded Smith-Waterman local alignment with band radius `k`.
+///
+/// Uses $O(k \cdot N)$ compact band storage suitable for long sequences ($>50\text{k bp}$).
 pub fn banded_smith_waterman(
     seq1: &[u8],
     seq2: &[u8],
@@ -330,22 +356,28 @@ pub fn banded_smith_waterman(
 ) -> AlignmentResult {
     let n = seq1.len();
     let m = seq2.len();
-    let cols = m + 1;
-    let mut matrix = vec![0i32; (n + 1) * cols];
+    let k_eff = k.max(n.abs_diff(m));
+    let band_width = 2 * k_eff + 1;
+    let k_s = k_eff as isize;
+    let mut band = vec![0i32; (n + 1) * band_width];
+
+    let idx = |i: usize, j: usize| -> Option<usize> {
+        let offset = (j as isize) - (i as isize) + k_s;
+        if offset >= 0 && (offset as usize) < band_width {
+            Some(i * band_width + (offset as usize))
+        } else {
+            None
+        }
+    };
 
     let mut max_score = 0;
     let mut max_i = 0;
     let mut max_j = 0;
 
-    let k_signed = k as isize;
-
     for i in 1..=n {
         let i_s = i as isize;
-        let j_start = (i_s - k_signed).max(1) as usize;
-        let j_end = (i_s + k_signed).min(m as isize) as usize;
-
-        let row_offset = i * cols;
-        let prev_row_offset = (i - 1) * cols;
+        let j_start = (i_s - k_s).max(1) as usize;
+        let j_end = (i_s + k_s).min(m as isize) as usize;
 
         for j in j_start..=j_end {
             let match_mismatch = if seq1[i - 1] == seq2[j - 1] {
@@ -354,12 +386,16 @@ pub fn banded_smith_waterman(
                 mismatch_score
             };
 
-            let diag = matrix[prev_row_offset + j - 1] + match_mismatch;
-            let up = matrix[prev_row_offset + j] + gap_penalty;
-            let left = matrix[row_offset + j - 1] + gap_penalty;
+            let diag = idx(i - 1, j - 1)
+                .map(|p| band[p] + match_mismatch)
+                .unwrap_or(0);
+            let up = idx(i - 1, j).map(|p| band[p] + gap_penalty).unwrap_or(0);
+            let left = idx(i, j - 1).map(|p| band[p] + gap_penalty).unwrap_or(0);
 
             let score = 0.max(diag.max(up).max(left));
-            matrix[row_offset + j] = score;
+            if let Some(curr) = idx(i, j) {
+                band[curr] = score;
+            }
 
             if score > max_score {
                 max_score = score;
@@ -374,20 +410,26 @@ pub fn banded_smith_waterman(
     let mut i = max_i;
     let mut j = max_j;
 
-    while i > 0 && j > 0 && matrix[i * cols + j] > 0 {
-        let current_score = matrix[i * cols + j];
+    while i > 0 && j > 0 {
+        let current_score = idx(i, j).map(|p| band[p]).unwrap_or(0);
+        if current_score <= 0 {
+            break;
+        }
         let match_mismatch = if seq1[i - 1] == seq2[j - 1] {
             match_score
         } else {
             mismatch_score
         };
 
-        if current_score == matrix[(i - 1) * cols + (j - 1)] + match_mismatch {
+        let diag_score = idx(i - 1, j - 1).map(|p| band[p]).unwrap_or(NEG_INF);
+        let up_score = idx(i - 1, j).map(|p| band[p]).unwrap_or(NEG_INF);
+
+        if current_score == diag_score + match_mismatch {
             align1.push(seq1[i - 1]);
             align2.push(seq2[j - 1]);
             i -= 1;
             j -= 1;
-        } else if current_score == matrix[(i - 1) * cols + j] + gap_penalty {
+        } else if current_score == up_score + gap_penalty {
             align1.push(seq1[i - 1]);
             align2.push(b'-');
             i -= 1;
@@ -456,5 +498,35 @@ mod tests {
         let sw = SmithWaterman::new(2, -1, -1);
         let res_full = sw.align(seq1, seq2);
         assert_eq!(res_banded.score, res_full.score);
+    }
+
+    #[test]
+    fn test_banded_alignment_50k_bp_benchmark() {
+        // Validation target: 50,000 bp alignment in O(k * N) memory and exact score match
+        let n = 50_000;
+        let bases = *b"ACGT";
+        let seq1: Vec<u8> = (0..n).map(|i| bases[(i * 7 + 3) % 4]).collect();
+        let mut seq2 = seq1.clone();
+        // Introduce 50 point mutations across 50k bp (1 per 1000 bp)
+        for idx in (500..n).step_by(1000) {
+            seq2[idx] = match seq2[idx] {
+                b'A' => b'G',
+                b'G' => b'A',
+                b'C' => b'T',
+                _ => b'C',
+            };
+        }
+
+        let res_nw = banded_needleman_wunsch(&seq1, &seq2, 1, -1, -2, 8);
+        // 49,950 matches (+1) and 50 mismatches (-1) = 49,900 exact optimal score
+        assert_eq!(res_nw.score, 49_900);
+        assert_eq!(res_nw.alignment1.len(), 50_000);
+
+        // Verify exact agreement with full DP on a 1,000 bp slice
+        let sub1 = &seq1[0..1000];
+        let sub2 = &seq2[0..1000];
+        let full_nw = NeedlemanWunsch::new(1, -1, -2).align(sub1, sub2);
+        let band_nw = banded_needleman_wunsch(sub1, sub2, 1, -1, -2, 8);
+        assert_eq!(band_nw.score, full_nw.score);
     }
 }

@@ -12,16 +12,25 @@ pub mod constraints;
 pub mod design;
 pub mod fidelity;
 pub mod guide;
+pub mod immune;
+pub mod niche;
 pub mod pathways;
+pub mod proteostasis;
 pub mod real_genome;
 pub mod report;
+pub mod reprogramming;
 pub mod risk;
 pub mod simulation;
 pub mod telomerase;
 pub mod telomere;
 pub mod validation;
+pub mod vascular;
 
-pub use clock::{calculate_aging_acceleration, estimate_biological_age, AgingProfile};
+pub use clock::{
+    calculate_aging_acceleration, estimate_biological_age, estimate_horvath_cpg_clock_age,
+    horvath_age_transform, horvath_anti_trafo, AgingProfile, HorvathCpGProbe,
+    CANONICAL_AGE_CPG_PROBES, HORVATH_ADULT_AGE_YEARS,
+};
 pub use constraints::{
     enforce_and_auto_remediate, validate_biological_constraints, ConstraintSeverity,
     ConstraintViolation, ConstraintViolationType,
@@ -36,9 +45,15 @@ pub use fidelity::{
     HighFidelityTelomereState, TelomeraseKinetics,
 };
 pub use guide::{design_real_guides, select_optimal_guide, RealGuide};
+pub use immune::ImmunosenescenceState;
+pub use niche::{
+    compute_stem_division_dynamics, evaluate_niche_competence, StemCellNicheState,
+    StemDivisionOutcome, MAX_SAFE_STEM_CELL_FRACTION,
+};
 pub use pathways::{
     find_longevity_gene, LongevityGeneInfo, LongevityPathway, CANONICAL_LONGEVITY_GENES,
 };
+pub use proteostasis::{autophagy_clearance, chaperone_refolding, ProteostasisState};
 pub use real_genome::{
     analyze_real_telomere, load_loci_from_fasta, load_loci_from_file,
     load_telomere_regions_from_fasta, load_telomere_regions_from_file, ChromosomeArm,
@@ -47,6 +62,11 @@ pub use real_genome::{
 };
 pub use report::{
     HighFidelityDesignReport, HighFidelityProposedEdit, LongevityMetricsComparison,
+    SequenceProvenance,
+};
+pub use reprogramming::{
+    simulate_in_vivo_osk_pulse_regimen, CycleMetric, DeliveryVector, InVivoReprogrammingReport,
+    OskPulseRegimen, SafetyVerdict, MAX_SAFE_ONCOGENIC_RISK_THRESHOLD,
 };
 pub use risk::{
     evaluate_oncogenic_risk, OncogenicRiskAssessment, PathwayRiskBreakdown, SafetyLocks,
@@ -61,3 +81,7 @@ pub use telomere::{
     TelomereState, VERTEBRATE_TELOMERE_REPEAT, VERTEBRATE_TELOMERE_REVERSE,
 };
 pub use validation::{validate_longevity_package, ValidationOutcome};
+pub use vascular::{
+    drug_bioavailability, VascularPerfusionState, MW_AAV_CAPSID_VECTOR_DA, MW_MRNA_LNP_VECTOR_DA,
+    MW_SMALL_MOLECULE_NAVITOCLAX_DA,
+};

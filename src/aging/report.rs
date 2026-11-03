@@ -15,10 +15,25 @@ use crate::seq::Dna;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+/// Origin of the target DNA sequence used to design a guide.
+///
+/// Guides designed from [`SequenceProvenance::SyntheticPlaceholder`] sequences are NOT
+/// biologically meaningful and must not be treated as real design output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SequenceProvenance {
+    /// Sequence supplied by the caller from a real reference assembly (e.g. T2T-CHM13 / GRCh38 FASTA).
+    RealReference,
+    /// Built-in toy sequence used only so the pipeline can run; guides and risk scores are not meaningful.
+    SyntheticPlaceholder,
+}
+
 /// An actionable high-fidelity genomic edit candidate with execution sequence metadata.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct HighFidelityProposedEdit {
+    /// Whether `target_sequence` is a real reference locus or a synthetic placeholder.
+    pub sequence_provenance: SequenceProvenance,
     /// Target gene HGNC symbol (e.g. "TERT", "SIRT6", "TP53", "ATM").
     pub target_gene: String,
     /// Nature of precision genetic modification.
@@ -183,6 +198,14 @@ impl HighFidelityDesignReport {
             ));
             out.push_str(&format!("   Action: {:?} | Strand: {:?}\n", edit.edit_type, edit.strand));
             out.push_str(&format!("   Rationale: {}\n", edit.rationale));
+            match edit.sequence_provenance {
+                SequenceProvenance::RealReference => out.push_str(
+                    "   Sequence Source: REAL reference locus (off-target scan limited to this locus window, NOT whole-genome)\n",
+                ),
+                SequenceProvenance::SyntheticPlaceholder => out.push_str(
+                    "   Sequence Source: SYNTHETIC PLACEHOLDER - guide and scores below are NOT biologically meaningful\n",
+                ),
+            }
             out.push_str(&format!(
                 "   Design Confidence: {:.1}% | Off-Target CFD Risk: {:.2}\n",
                 edit.confidence_score * 100.0,

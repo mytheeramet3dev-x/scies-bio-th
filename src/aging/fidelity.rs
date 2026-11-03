@@ -245,6 +245,88 @@ pub fn apply_high_fidelity_telomerase(
     added
 }
 
+/// Evaluates locus chromatin accessibility ($0.0$ to $1.0$) by integrating Gardiner-Garden & Frommer
+/// CpG island density with ChromHMM-like histone post-translational modification states.
+#[cfg(feature = "epigenome")]
+pub fn evaluate_epigenomic_locus_accessibility(
+    locus_dna: &crate::seq::Dna,
+    marks: &[crate::epigenome::histone::HistoneMark],
+) -> f64 {
+    use crate::epigenome::histone::{infer_chromatin_state, ChromatinState};
+    use crate::epigenome::methylation::find_cpg_islands;
+
+    let state = infer_chromatin_state(marks);
+    let base_accessibility: f64 = match state {
+        ChromatinState::ActivePromoter => 0.92,
+        ChromatinState::ActiveEnhancer => 0.88,
+        ChromatinState::Transcribed => 0.78,
+        ChromatinState::BivalentPromoter => 0.58,
+        ChromatinState::PrimedEnhancer => 0.55,
+        ChromatinState::Quiescent => 0.40,
+        ChromatinState::PolycombRepressed => 0.22,
+        ChromatinState::Heterochromatin => 0.10,
+    };
+
+    let islands = find_cpg_islands(locus_dna, 200, 50, 0.50, 0.60);
+    let cpg_boost = if !islands.is_empty() { 0.06 } else { 0.0 };
+
+    (base_accessibility + cpg_boost).clamp(0.05, 0.99)
+}
+
+/// Evaluates 3D structural druggability and senolytic ligand binding score for an anti-apoptotic
+/// senescence target (e.g. BCL-2 / BCL-xL BH3 groove) using `docking::grid` and `docking::score`.
+///
+/// Returns `(largest_pocket_volume_a3, docking_total_kcal_mol, druggability_index_0_to_1)`.
+#[cfg(feature = "docking")]
+pub fn evaluate_senolytic_pocket_druggability(
+    receptor_atoms: &[crate::structure::Atom3D],
+    ligand_atoms: &[crate::structure::Atom3D],
+) -> crate::Result<(f64, f64, f64)> {
+    use crate::docking::{calculate_interaction_energy, BoundingBox3D, CavityGrid3D};
+
+    let bbox = BoundingBox3D::from_atoms(receptor_atoms, 2.0)?;
+    let mut grid = CavityGrid3D::new(&bbox, 1.0);
+    grid.populate_atoms(receptor_atoms, 0.5);
+
+    let pockets = grid.detect_pockets(4, 8.0);
+    let largest_volume = pockets.first().map(|p| p.volume_angstrom3).unwrap_or(0.0);
+
+    let score = calculate_interaction_energy(receptor_atoms, ligand_atoms, None, None, 10.0);
+
+    // Druggable BH3-mimetic pockets typically have volume >= 150 A^3 and favorable negative kcal/mol
+    let volume_factor = (largest_volume / 250.0).clamp(0.0, 1.0);
+    let affinity_factor = ((-score.total_score) / 10.0).clamp(0.0, 1.0);
+    let druggability = (0.45 * volume_factor + 0.55 * affinity_factor).clamp(0.0, 1.0);
+
+    Ok((largest_volume, score.total_score, druggability))
+}
+
+/// Evaluates whether a partial OSK / senolytic dosing regimen keeps single-cell developmental
+/// pseudotime below the dedifferentiation / teratoma safety threshold while achieving therapeutic PK/PD response.
+#[cfg(all(feature = "singlecell", feature = "pharma"))]
+pub fn evaluate_rejuvenation_pkpd_and_pseudotime_safety(
+    cells: &[crate::singlecell::CellStateNode],
+    root_cell_id: &str,
+    pkpd_params: &crate::pharma::PkPdParameters,
+    dose_um: f64,
+    interval_hours: usize,
+    num_doses: usize,
+    max_safe_pseudotime: f64,
+) -> crate::Result<(crate::singlecell::PseudotimeTrajectory, crate::pharma::PkPdRegimenReport, bool)> {
+    let pt = crate::singlecell::compute_diffusion_pseudotime(cells, root_cell_id)?;
+    let pkpd = crate::pharma::simulate_pkpd_regimen(pkpd_params, dose_um, interval_hours, num_doses);
+
+    let max_observed_pt = pt
+        .points
+        .iter()
+        .map(|p| p.pseudotime)
+        .fold(0.0_f64, f64::max);
+    let safe_and_effective =
+        max_observed_pt <= max_safe_pseudotime && pkpd.within_therapeutic_window;
+
+    Ok((pt, pkpd, safe_and_effective))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,5 +356,72 @@ mod tests {
         assert!(res.composite_biological_age > 20.0);
         assert!(res.composite_biological_age < 50.0); // Biologically rejuvenated
         assert!(res.aging_acceleration < 0.0);
+    }
+
+    #[cfg(feature = "epigenome")]
+    #[test]
+    fn test_evaluate_epigenomic_locus_accessibility() {
+        use crate::epigenome::HistoneMark;
+        let cpg_dna = crate::seq::Dna::new(b"CGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCG").unwrap();
+        let active_acc = evaluate_epigenomic_locus_accessibility(
+            &cpg_dna,
+            &[HistoneMark::H3K4me3, HistoneMark::H3K27ac],
+        );
+        let repressed_acc = evaluate_epigenomic_locus_accessibility(
+            &cpg_dna,
+            &[HistoneMark::H3K9me3],
+        );
+        assert!(active_acc > 0.85);
+        assert!(repressed_acc < 0.25);
+    }
+
+    #[cfg(feature = "docking")]
+    #[test]
+    fn test_evaluate_senolytic_pocket_druggability() {
+        use crate::structure::Atom3D;
+        let mut receptor = Vec::new();
+        let mut serial = 1;
+        for ix in -5i32..=5 {
+            for iy in -5i32..=5 {
+                for iz in -5i32..=5 {
+                    let (x, y, z) = (ix as f64, iy as f64, iz as f64);
+                    let r = (x * x + y * y + z * z).sqrt();
+                    if (3.8..=5.2).contains(&r) {
+                        receptor.push(Atom3D {
+                            serial,
+                            name: "CA".to_string(),
+                            res_name: "LEU".to_string(),
+                            chain_id: 'A',
+                            res_seq: serial as i32,
+                            x,
+                            y,
+                            z,
+                            occupancy: 1.0,
+                            b_factor: 10.0,
+                            element: "C".to_string(),
+                        });
+                        serial += 1;
+                    }
+                }
+            }
+        }
+        let ligand = vec![Atom3D {
+            serial: 999,
+            name: "C1".to_string(),
+            res_name: "NAV".to_string(),
+            chain_id: 'L',
+            res_seq: 1,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            occupancy: 1.0,
+            b_factor: 10.0,
+            element: "C".to_string(),
+        }];
+        let (vol, score, drug_idx) =
+            evaluate_senolytic_pocket_druggability(&receptor, &ligand).unwrap();
+        assert!(vol > 0.0);
+        assert!(score < 0.0);
+        assert!(drug_idx > 0.1);
     }
 }

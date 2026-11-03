@@ -89,3 +89,37 @@ pub fn evaluate_chromatin_accessibility(
         peaks: significant_peaks,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_chromatin_accessibility_profile() {
+        let peaks = vec![
+            ChromatinPeak {
+                chromosome: "chr5".to_string(),
+                start: 100,
+                end: 500,
+                signal_value: 12.5,
+                p_value_neg_log10: 8.0,
+                q_value_neg_log10: 5.5,
+            },
+            ChromatinPeak {
+                chromosome: "chr5".to_string(),
+                start: 700,
+                end: 800,
+                signal_value: 1.2,
+                p_value_neg_log10: 0.8,
+                q_value_neg_log10: 0.3, // Below threshold
+            },
+        ];
+
+        let profile = evaluate_chromatin_accessibility(1000, peaks, 2.0);
+        assert_eq!(profile.peaks.len(), 1);
+        assert_eq!(profile.open_chromatin_length, 400);
+        assert!((profile.accessibility_fraction - 0.4).abs() < 1e-6);
+        assert!((profile.mean_signal - 12.5).abs() < 1e-6);
+        assert_eq!(profile.peaks[0].summit(), 300);
+    }
+}

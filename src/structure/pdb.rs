@@ -204,6 +204,7 @@ pub fn parse_pdb<R: BufRead>(reader: R) -> crate::Result<ProteinStructure3D> {
 
 /// Parses mmCIF format records starting with `_atom_site` lines.
 pub fn parse_mmcif<R: BufRead>(reader: R) -> crate::Result<ProteinStructure3D> {
+    let mut structure_id = "MMCIF".to_string();
     let mut atoms = Vec::new();
     let mut in_atom_site_loop = false;
     let mut col_map = std::collections::HashMap::new();
@@ -212,6 +213,19 @@ pub fn parse_mmcif<R: BufRead>(reader: R) -> crate::Result<ProteinStructure3D> {
     for line_result in reader.lines() {
         let line = line_result.map_err(|e| BioError::ParseError(e.to_string()))?;
         let trimmed = line.trim();
+
+        if let Some(id_rest) = trimmed.strip_prefix("data_") {
+            if !id_rest.is_empty() {
+                structure_id = id_rest.to_string();
+            }
+            continue;
+        }
+        if trimmed.starts_with("_entry.id") {
+            if let Some(tok) = trimmed.split_whitespace().nth(1) {
+                structure_id = tok.to_string();
+            }
+            continue;
+        }
 
         if trimmed == "loop_" {
             in_atom_site_loop = false;
@@ -245,6 +259,7 @@ pub fn parse_mmcif<R: BufRead>(reader: R) -> crate::Result<ProteinStructure3D> {
             }
 
             let id_idx = *col_map.get("id").unwrap_or(&1);
+            let elem_idx = col_map.get("type_symbol").copied();
             let name_idx = *col_map.get("auth_atom_id").or_else(|| col_map.get("label_atom_id")).unwrap_or(&2);
             let res_idx = *col_map.get("auth_comp_id").or_else(|| col_map.get("label_comp_id")).unwrap_or(&3);
             let chain_idx = *col_map.get("auth_asym_id").or_else(|| col_map.get("label_asym_id")).unwrap_or(&4);
@@ -256,6 +271,10 @@ pub fn parse_mmcif<R: BufRead>(reader: R) -> crate::Result<ProteinStructure3D> {
 
             let serial: usize = parts.get(id_idx).and_then(|s| s.parse().ok()).unwrap_or(0);
             let name = parts.get(name_idx).copied().unwrap_or("CA").to_string();
+            let element = elem_idx
+                .and_then(|idx| parts.get(idx).copied())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| name.chars().next().map(|c| c.to_string()).unwrap_or_else(|| "C".to_string()));
             let res_name = parts.get(res_idx).copied().unwrap_or("UNK").to_string();
             let chain_id = parts.get(chain_idx).and_then(|s| s.chars().next()).unwrap_or('A');
             let res_seq: i32 = parts.get(seq_idx).and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -275,7 +294,7 @@ pub fn parse_mmcif<R: BufRead>(reader: R) -> crate::Result<ProteinStructure3D> {
                 z,
                 occupancy: 1.0,
                 b_factor,
-                element: "C".to_string(),
+                element,
             });
         }
     }
@@ -311,7 +330,7 @@ pub fn parse_mmcif<R: BufRead>(reader: R) -> crate::Result<ProteinStructure3D> {
     }
 
     Ok(ProteinStructure3D {
-        id: "MMCIF".to_string(),
+        id: structure_id,
         chains,
     })
 }
@@ -347,5 +366,33 @@ END\n";
 
         let dist = cas[0].distance(cas[1]);
         assert!((dist - 3.8).abs() < 0.5); // Standard peptide Cα-Cα bond length ~3.8 Å
+    }
+
+    #[test]
+    fn test_parse_mmcif_basic() {
+        let cif_content = "\
+data_1UBQ\n\
+loop_\n\
+_atom_site.group_PDB\n\
+_atom_site.id\n\
+_atom_site.type_symbol\n\
+_atom_site.label_atom_id\n\
+_atom_site.label_comp_id\n\
+_atom_site.label_asym_id\n\
+_atom_site.label_seq_id\n\
+_atom_site.Cartn_x\n\
+_atom_site.Cartn_y\n\
+_atom_site.Cartn_z\n\
+_atom_site.B_iso_or_equiv\n\
+ATOM 1 N N MET A 1 27.340 24.430 2.614 9.67\n\
+ATOM 2 C CA MET A 1 26.266 25.413 2.842 10.38\n\
+ATOM 3 C CA GLN A 2 26.335 27.770 5.858 11.20\n\
+#\n";
+        let reader = std::io::BufReader::new(cif_content.as_bytes());
+        let structure = parse_mmcif(reader).unwrap();
+        assert_eq!(structure.id, "1UBQ");
+        assert_eq!(structure.ca_atoms().len(), 2);
+        assert_eq!(structure.ca_atoms()[0].res_name, "MET");
+        assert_eq!(structure.ca_atoms()[1].res_name, "GLN");
     }
 }

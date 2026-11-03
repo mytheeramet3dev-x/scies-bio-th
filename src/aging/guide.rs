@@ -11,7 +11,7 @@
 //! - Cutting Frequency Determination (CFD) off-target penalties.
 
 use crate::edit::crispr::find_spcas9_pam;
-use crate::edit::offtarget::calculate_cfd_score;
+use crate::edit::offtarget::calculate_doench_2016_cfd;
 use crate::genome::Strand;
 use crate::seq::{Dna, Rna};
 
@@ -97,6 +97,127 @@ fn dna_slice_to_rna(dna_slice: &[u8]) -> Option<Rna> {
     Rna::new(&rna_bytes).ok()
 }
 
+/// Evaluates locus-wide off-target specificity (0.0 to 100.0, higher = safer/more specific)
+/// by scanning all alternative PAM-adjacent 20-mers on both strands using the Doench 2016 CFD matrix
+/// and penalizing low-complexity seed regions.
+fn evaluate_guide_specificity(
+    guide_rna: &Rna,
+    on_target_strand: Strand,
+    on_target_pam_idx: usize,
+    fwd_dna: &Dna,
+    rev_dna: &Dna,
+) -> f64 {
+    let mut cumulative_offtarget_cfd = 0.0_f64;
+
+    // Scan forward strand alternative PAMs (NGG and NAG)
+    let fwd_bytes = &fwd_dna.sequence;
+    if fwd_bytes.len() >= 23 {
+        for i in 20..=(fwd_bytes.len() - 3) {
+            if on_target_strand == Strand::Forward && i == on_target_pam_idx {
+                continue;
+            }
+            let pam1 = fwd_bytes[i + 1];
+            let pam2 = fwd_bytes[i + 2];
+            let is_ngg = pam1 == b'G' && pam2 == b'G';
+            let is_nag = pam1 == b'A' && pam2 == b'G';
+            if is_ngg || is_nag {
+                if let Ok(alt_dna) = Dna::new(&fwd_bytes[i - 20..i]) {
+                    let cfd = calculate_doench_2016_cfd(guide_rna, &alt_dna).score;
+                    let pam_weight = if is_ngg { 1.0 } else { 0.25 };
+                    cumulative_offtarget_cfd += cfd * pam_weight;
+                }
+            }
+        }
+    }
+
+    // Scan reverse strand alternative PAMs (NGG and NAG)
+    let rev_bytes = &rev_dna.sequence;
+    if rev_bytes.len() >= 23 {
+        for i in 20..=(rev_bytes.len() - 3) {
+            if on_target_strand == Strand::Reverse && i == on_target_pam_idx {
+                continue;
+            }
+            let pam1 = rev_bytes[i + 1];
+            let pam2 = rev_bytes[i + 2];
+            let is_ngg = pam1 == b'G' && pam2 == b'G';
+            let is_nag = pam1 == b'A' && pam2 == b'G';
+            if is_ngg || is_nag {
+                if let Ok(alt_dna) = Dna::new(&rev_bytes[i - 20..i]) {
+                    let cfd = calculate_doench_2016_cfd(guide_rna, &alt_dna).score;
+                    let pam_weight = if is_ngg { 1.0 } else { 0.25 };
+                    cumulative_offtarget_cfd += cfd * pam_weight;
+                }
+            }
+        }
+    }
+
+    // Seed region (last 10 nt) Shannon complexity penalty
+    let seed = &guide_rna.sequence[guide_rna.sequence.len().saturating_sub(10)..];
+    let mut counts = [0usize; 4];
+    for &b in seed {
+        match b {
+            b'A' => counts[0] += 1,
+            b'C' => counts[1] += 1,
+            b'G' => counts[2] += 1,
+            b'U' => counts[3] += 1,
+            _ => {}
+        }
+    }
+    let distinct_bases = counts.iter().filter(|&&c| c > 0).count();
+    let complexity_penalty = match distinct_bases {
+        4 => 1.5,
+        3 => 4.0,
+        2 => 9.5,
+        _ => 18.0,
+    };
+
+    let specificity = 100.0 / (1.0 + cumulative_offtarget_cfd / 50.0) - complexity_penalty;
+    specificity.clamp(50.0, 99.0)
+}
+
+/// Checks whether a candidate 20-nt guide target overlaps a high-affinity essential
+/// JASPAR transcription factor binding site (`TFAP2A` or `SP1`), which should not be disrupted.
+fn disrupts_essential_tfbs(dna_slice: &[u8]) -> bool {
+    use crate::regulatory::tfbs::{
+        jaspar_ma0003_1_tfap2a, jaspar_ma0079_3_sp1, scan_jaspar_tfbs,
+    };
+    if let Ok(sub_dna) = Dna::new(dna_slice) {
+        let tfap2a_hits = scan_jaspar_tfbs(&sub_dna, &jaspar_ma0003_1_tfap2a(), 0.92);
+        let sp1_hits = scan_jaspar_tfbs(&sub_dna, &jaspar_ma0079_3_sp1(), 0.92);
+        !tfap2a_hits.is_empty() || !sp1_hits.is_empty()
+    } else {
+        false
+    }
+}
+
+/// Computes local CpG Observed/Expected ratio around the guide site to estimate promoter chromatin accessibility.
+fn local_cpg_obs_exp(window: &[u8]) -> f64 {
+    if window.len() < 10 {
+        return 0.0;
+    }
+    let mut c_count = 0usize;
+    let mut g_count = 0usize;
+    let mut cpg_count = 0usize;
+    for i in 0..window.len() {
+        match window[i] {
+            b'C' | b'c' => {
+                c_count += 1;
+                if i + 1 < window.len() && (window[i + 1] == b'G' || window[i + 1] == b'g') {
+                    cpg_count += 1;
+                }
+            }
+            b'G' | b'g' => g_count += 1,
+            _ => {}
+        }
+    }
+    let denom = (c_count * g_count) as f64;
+    if denom > 0.0 {
+        (cpg_count as f64 * window.len() as f64) / denom
+    } else {
+        0.0
+    }
+}
+
 /// Designs and ranks all possible SpCas9 candidate guides from a real genomic locus context.
 pub fn design_real_guides(
     locus_sequence: &Dna,
@@ -109,6 +230,8 @@ pub fn design_real_guides(
         return guides;
     }
 
+    let rev_dna = locus_sequence.reverse_complement();
+
     // 1. Scan forward strand for NGG PAMs
     let fwd_pams = find_spcas9_pam(locus_sequence);
     for pam in fwd_pams {
@@ -120,9 +243,13 @@ pub fn design_real_guides(
                 let (has_poly_t, has_poly_g) = check_homopolymers(dna_slice);
                 let is_telo = is_telomere_repeat_guide(dna_slice);
 
-                // Mock CFD score against self (baseline 100.0)
-                let cfd = calculate_cfd_score(&rna, locus_sequence);
-                let offtarget_score = cfd.score;
+                let offtarget_score = evaluate_guide_specificity(
+                    &rna,
+                    Strand::Forward,
+                    pam.index,
+                    locus_sequence,
+                    &rev_dna,
+                );
 
                 // Confidence scoring
                 let mut confidence = 0.95_f64;
@@ -154,6 +281,15 @@ pub fn design_real_guides(
                     confidence -= 0.05;
                 }
 
+                if local_cpg_obs_exp(dna_slice) >= 0.60 {
+                    confidence += 0.03;
+                    rationale.push("Open CpG-island chromatin context".to_string());
+                }
+                if disrupts_essential_tfbs(dna_slice) {
+                    confidence -= 0.12;
+                    rationale.push("Caution: overlaps essential JASPAR TFBS (TFAP2A/SP1)".to_string());
+                }
+
                 let pam_motif = String::from_utf8_lossy(&pam.sequence).to_string();
                 let guide = RealGuide {
                     sequence: rna,
@@ -175,7 +311,6 @@ pub fn design_real_guides(
     }
 
     // 2. Scan reverse complement strand for reverse PAMs
-    let rev_dna = locus_sequence.reverse_complement();
     let rev_bytes = &rev_dna.sequence;
     let rev_pams = find_spcas9_pam(&rev_dna);
     let locus_len = bytes.len();
@@ -189,8 +324,13 @@ pub fn design_real_guides(
                     let (has_poly_t, has_poly_g) = check_homopolymers(dna_slice);
                     let is_telo = is_telomere_repeat_guide(dna_slice);
 
-                    let cfd = calculate_cfd_score(&rna, &rev_dna);
-                    let offtarget_score = cfd.score;
+                    let offtarget_score = evaluate_guide_specificity(
+                        &rna,
+                        Strand::Reverse,
+                        pam.index,
+                        locus_sequence,
+                        &rev_dna,
+                    );
 
                     let mut confidence = 0.95_f64;
                     let mut rationale = Vec::new();
@@ -218,6 +358,15 @@ pub fn design_real_guides(
 
                     if preferred_strand != Strand::Unknown && preferred_strand != Strand::Reverse {
                         confidence -= 0.05;
+                    }
+
+                    if local_cpg_obs_exp(dna_slice) >= 0.60 {
+                        confidence += 0.03;
+                        rationale.push("Open CpG-island chromatin context".to_string());
+                    }
+                    if disrupts_essential_tfbs(dna_slice) {
+                        confidence -= 0.12;
+                        rationale.push("Caution: overlaps essential JASPAR TFBS (TFAP2A/SP1)".to_string());
                     }
 
                     // Map reverse complement coordinate back to forward strand

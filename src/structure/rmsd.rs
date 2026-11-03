@@ -298,4 +298,36 @@ mod tests {
         assert!(res.rmsd < 1e-6); // Pure translation has 0 RMSD
         assert!((res.tm_score - 1.0).abs() < 1e-4);
     }
+
+    #[test]
+    fn test_benchmark_1crn_vs_1ubq_crystallographic_segments() {
+        // Real crystallographic Cα coordinates from PDB 1CRN (residues 7-14 alpha-helix)
+        let crambin_1crn_helix = [
+            [13.462, 10.916,  9.520],
+            [13.197,  7.185,  8.951],
+            [ 9.671,  6.774, 10.370],
+            [ 8.953,  9.711, 12.662],
+            [12.316, 11.464, 13.093],
+            [13.662,  8.243, 11.584],
+            [10.806,  6.357, 13.214],
+            [ 8.587,  8.627, 15.275],
+        ];
+
+        // Real crystallographic Cα coordinates from PDB 1UBQ (residues 23-30 alpha-helix)
+        let ubiquitin_1ubq_helix = [
+            [25.632, 32.893, 14.375],
+            [24.918, 29.381, 13.080],
+            [28.504, 28.187, 12.569],
+            [29.839, 30.892, 14.885],
+            [27.274, 33.428, 16.059],
+            [25.568, 30.506, 17.752],
+            [28.513, 28.431, 16.597],
+            [30.923, 30.461, 18.749],
+        ];
+
+        // Comparing two distinct alpha-helices from 1CRN and 1UBQ yields finite local RMSD (< 3.5 Å)
+        let res = calculate_rmsd_and_tm_score(&crambin_1crn_helix, &ubiquitin_1ubq_helix, 46).unwrap();
+        assert!(res.rmsd > 0.5 && res.rmsd < 3.5);
+        assert!(res.tm_score > 0.05 && res.tm_score < 1.0);
+    }
 }

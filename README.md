@@ -14,7 +14,7 @@ scies_bio_th::
 ├── seq            — DNA, RNA, and Protein validated sequence primitives & K-mers
 ├── align          — Local (Smith-Waterman), Global (Needleman-Wunsch), Banded NW/SW, Levenshtein & Hamming
 ├── codon          — Universal genetic code translation, ORF & genomic region finder
-├── edit           — CRISPR-Cas9/Cas12a PAM discovery, Doench 2016 CFD matrix, and PCR primer design
+├── edit           — CRISPR-Cas9/Cas12a PAM discovery, Doench 2016 CFD matrix, Prime Editing pegRNA, and ABE8e Base Editing
 ├── vaccine        — Personalized cancer neoantigen identification, HLA/MHC Class I binding & confidence tiers
 ├── motif          — Position Weight Matrix (PWM / PSSM) scanning and consensus pattern matching
 ├── hmm            — Hidden Markov Models (Viterbi decoding, sequence emission probabilities)
@@ -27,15 +27,22 @@ scies_bio_th::
 ├── genomics       — K-mer spectrum counting and De Bruijn Graph unitig sequence assembly
 ├── transcriptomics— Expression normalization: Transcripts Per Million (TPM), RPKM, and CPM
 ├── proteomics     — In silico proteolytic cleavage (Trypsin, Chymotrypsin, LysC), monoisotopic mass & pI
-├── aging          — Longevity engineering, Telomere dynamics (TTAGGG), Telomerase (TERT), and Multi-generation simulation
 ├── metagenomics   — Alpha diversity metrics: Shannon-Wiener index, Simpson, Evenness, and Chao1
 │
+├── anatomy        — Multi-organ physiology circuits (Cardiovascular, Cardiopulmonary, Enterohepatic, RAAS, Neuroendocrine, Immune, Energy, ECM)
 ├── structure      — [feature = "structure"] PDB/mmCIF parser, DSSP secondary structure, Kabsch RMSD/TM-score, Contact maps
 ├── network        — [feature = "network"] Biological graphs, PPI networks & hubs, KEGG pathway DAG, Brandes centrality
-├── stats          — [feature = "stats"] Mann-Whitney U, Fisher's Exact (2x2), Chi-square, Benjamini-Hochberg FDR, Vector metrics
+├── stats          — [feature = "stats"] Mann-Whitney U, Wilcoxon, Kruskal-Wallis, Fisher's Exact, Chi-square, Benjamini-Hochberg FDR
 ├── docking        — [feature = "docking"] 3D grid cavity detection, Lennard-Jones 6-12 Van der Waals & Coulombic electrostatics
 ├── epigenome      — [feature = "epigenome"] Gardiner-Garden CpG islands, Beta/M-values, ATAC-seq accessibility, ChromHMM states
-└── ivg            — [feature = "experimental"] In Vitro Gametogenesis (IVG), Epigenetic reprogramming, SCNT cloning
+├── regulatory     — [feature = "regulatory"] Gene Regulatory Networks (GRN), Enhancers, Promoters, JASPAR TFBS motifs
+├── multiomics     — [feature = "multiomics"] NMF cell-type deconvolution, multi-omics biomarker disease signatures
+├── singlecell     — [feature = "singlecell"] Diffusion pseudotime cell ordering, RNA velocity induction & repression
+├── pharma         — [feature = "pharma"] PK/PD pharmacokinetic simulation, Hill equation dynamics, therapeutic windows
+├── safety         — [feature = "safety"] p53 tumor suppressor DNA damage checkpoints & oncogenic lockout
+├── aging          — [feature = "aging"] Longevity engineering, Telomeres, Telomerase, Horvath Clock, OSK reprogramming, Immune rejuvenation
+├── imaging        — [feature = "imaging"] Cell segmentation and bioimaging metadata primitives
+└── ivg            — [feature = "experimental"] In Vitro Gametogenesis, SCNT cloning, Ovarian organoid folliculogenesis
 ```
 
 ---

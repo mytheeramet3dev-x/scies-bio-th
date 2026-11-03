@@ -9,3 +9,6 @@ pub use centrality::{betweenness_centrality, closeness_centrality, degree_centra
 pub use graph::BioGraph;
 pub use pathway::{PathwayDag, PathwayInteractionType};
 pub use ppi::PpiNetwork;
+
+#[cfg(feature = "regulatory")]
+pub use crate::regulatory::grn;

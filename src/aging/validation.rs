@@ -77,11 +77,20 @@ pub fn validate_longevity_package(report: &HighFidelityDesignReport) -> Validati
         ));
     }
 
-    // 3. Verify hard biological safety constraints
+    // 3. Verify hard biological safety constraints using remediated expression level
     let telomerase_level = match report.strategy {
         LongevityStrategy::Conservative => 0.0,
         LongevityStrategy::Balanced => 0.80,
-        LongevityStrategy::Aggressive => 0.95,
+        LongevityStrategy::Aggressive => {
+            if report.oncogenic_risk.safeguards.super_p53_active
+                && report.oncogenic_risk.safeguards.inducible_suicide_switch
+                && report.oncogenic_risk.safeguards.cell_cycle_restriction
+            {
+                0.95
+            } else {
+                0.80
+            }
+        }
     };
 
     let constraint_violations = validate_biological_constraints(

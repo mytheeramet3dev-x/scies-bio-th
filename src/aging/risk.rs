@@ -66,18 +66,18 @@ impl SafetyLocks {
     pub fn cumulative_mitigation_efficiency(&self) -> f64 {
         let mut retention = 1.0_f64;
         if self.super_p53_active {
-            retention *= 0.35; // 65% reduction in crisis/checkpoint failure
+            retention *= 0.55; // 45% reduction in crisis/checkpoint failure
         }
         if self.inducible_suicide_switch {
-            retention *= 0.30; // 70% reduction in malignant clone expansion
+            retention *= 0.50; // 50% reduction in malignant clone expansion
         }
         if self.high_fidelity_nuclease {
-            retention *= 0.40; // 60% reduction in off-target oncogene transactivation
+            retention *= 0.65; // 35% reduction in off-target oncogene transactivation
         }
         if self.cell_cycle_restriction {
-            retention *= 0.50; // 50% reduction in unscheduled proliferation
+            retention *= 0.70; // 30% reduction in unscheduled proliferation
         }
-        (1.0_f64 - retention).clamp(0.0_f64, 0.98_f64)
+        (1.0_f64 - retention).clamp(0.0_f64, 0.95_f64)
     }
 }
 
@@ -97,13 +97,18 @@ pub struct OncogenicRiskAssessment {
     pub is_acceptable_safety_profile: bool,
 }
 
-/// Evaluates high-fidelity oncogenic transformation hazards across pathways.
+/// Evaluates high-fidelity oncogenic transformation hazards across pathways,
+/// integrating the formal `safety::oncogene` scoring engine.
 pub fn evaluate_oncogenic_risk(
     telomerase_expression: f64,
     sgrna_offtarget_scores: &[f64],
     shelterin_capping: f64,
     safeguards: &SafetyLocks,
 ) -> OncogenicRiskAssessment {
+    use crate::safety::oncogene::{
+        evaluate_oncogenic_activation_risk, OncogeneInterventionInput,
+    };
+
     // 1. Crisis bypass: scales non-linearly with unconstrained TERT
     let crisis_bypass = if telomerase_expression <= 0.05 {
         0.01
@@ -119,16 +124,27 @@ pub fn evaluate_oncogenic_risk(
     };
     let proto_oncogene_risk = (avg_offtarget * 0.45).clamp(0.01, 0.85);
 
-    // 3. Checkpoint loss risk: baseline tissue risk modulated by telomerase stress
+    // 3. Formal safety::oncogene risk model
+    let formal_onco = evaluate_oncogenic_activation_risk(&OncogeneInterventionInput {
+        tert_fold: 1.0 + telomerase_expression * 2.5,
+        myc_fold: 1.0,
+        reprogramming_intensity: 0.15,
+        tumor_suppressor_fold: if safeguards.super_p53_active { 1.8 } else { 1.0 },
+        offtarget_cleavage_burden: proto_oncogene_risk,
+        has_suicide_switch: safeguards.inducible_suicide_switch,
+    });
+
+    // 4. Checkpoint loss risk: baseline tissue risk modulated by telomerase stress
     let checkpoint_loss = (0.08 + telomerase_expression * 0.20).min(0.75);
 
-    // 4. Chromosomal instability from defective shelterin capping (dicentric bridge formation)
+    // 5. Chromosomal instability from defective shelterin capping (dicentric bridge formation)
     let instability_risk = ((1.0 - shelterin_capping) * 0.65).clamp(0.02, 0.90);
 
-    // Weighted raw total
-    let total_unmitigated = (0.35 * crisis_bypass
-        + 0.25 * proto_oncogene_risk
-        + 0.20 * checkpoint_loss
+    // Weighted raw total combining pathway hazards and formal oncogene drive
+    let total_unmitigated = (0.30 * crisis_bypass
+        + 0.20 * proto_oncogene_risk
+        + 0.15 * formal_onco.proliferative_drive_score
+        + 0.15 * checkpoint_loss
         + 0.20 * instability_risk)
         .clamp(0.01, 0.99);
 

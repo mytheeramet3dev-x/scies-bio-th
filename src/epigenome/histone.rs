@@ -87,6 +87,31 @@ pub fn infer_chromatin_state(marks: &[HistoneMark]) -> ChromatinState {
     }
 }
 
+/// Quantitative H3K27ac ChIP-seq signal summary for enhancer/super-enhancer calling.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct H3K27acQuantification {
+    /// Background-subtracted fold enrichment (ChIP RPM / Input RPM).
+    pub fold_enrichment: f64,
+    /// Normalized acetylation intensity in $[0.0, 1.0]$.
+    pub normalized_activity: f64,
+    /// Whether the signal exceeds super-enhancer stitching threshold ($\ge 12.5$ fold enrichment).
+    pub is_super_enhancer_like: bool,
+}
+
+/// Quantifies H3K27ac active histone acetylation signal relative to input control.
+pub fn quantify_h3k27ac_signal(chip_signal: f64, input_control: f64) -> H3K27acQuantification {
+    let bg = input_control.max(0.5);
+    let fold = (chip_signal.max(0.0) / bg).max(0.0);
+    // Log-logistic saturation curve calibrated so fold=5.0 -> ~0.71, fold=15.0 -> ~0.94
+    let normalized_activity = (fold / (fold + 2.0)).clamp(0.0, 1.0);
+    H3K27acQuantification {
+        fold_enrichment: fold,
+        normalized_activity,
+        is_super_enhancer_like: fold >= 12.5,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -85,15 +85,16 @@ pub struct CavityGrid3D {
 impl CavityGrid3D {
     /// Initializes a 3D grid encompassing the specified bounding box.
     pub fn new(bbox: &BoundingBox3D, spacing: f64) -> Self {
+        let s = spacing.max(0.01);
         let dims_f = bbox.dimensions();
-        let nx = (dims_f[0] / spacing).ceil() as usize + 1;
-        let ny = (dims_f[1] / spacing).ceil() as usize + 1;
-        let nz = (dims_f[2] / spacing).ceil() as usize + 1;
+        let nx = (dims_f[0] / s).ceil() as usize + 1;
+        let ny = (dims_f[1] / s).ceil() as usize + 1;
+        let nz = (dims_f[2] / s).ceil() as usize + 1;
 
         let total_voxels = nx * ny * nz;
         Self {
             origin: bbox.min,
-            spacing,
+            spacing: s,
             dims: [nx, ny, nz],
             occupied: vec![false; total_voxels],
         }
@@ -135,12 +136,26 @@ impl CavityGrid3D {
             let cutoff = r_atom + probe_radius;
             let cutoff_sq = cutoff * cutoff;
 
-            let min_i = (((atom.x - cutoff - self.origin[0]) / self.spacing).floor() as isize).max(0) as usize;
-            let max_i = (((atom.x + cutoff - self.origin[0]) / self.spacing).ceil() as usize).min(self.dims[0] - 1);
-            let min_j = (((atom.y - cutoff - self.origin[1]) / self.spacing).floor() as isize).max(0) as usize;
-            let max_j = (((atom.y + cutoff - self.origin[1]) / self.spacing).ceil() as usize).min(self.dims[1] - 1);
-            let min_k = (((atom.z - cutoff - self.origin[2]) / self.spacing).floor() as isize).max(0) as usize;
-            let max_k = (((atom.z + cutoff - self.origin[2]) / self.spacing).ceil() as usize).min(self.dims[2] - 1);
+            let raw_min_i = ((atom.x - cutoff - self.origin[0]) / self.spacing).floor() as isize;
+            let raw_max_i = ((atom.x + cutoff - self.origin[0]) / self.spacing).ceil() as isize;
+            let raw_min_j = ((atom.y - cutoff - self.origin[1]) / self.spacing).floor() as isize;
+            let raw_max_j = ((atom.y + cutoff - self.origin[1]) / self.spacing).ceil() as isize;
+            let raw_min_k = ((atom.z - cutoff - self.origin[2]) / self.spacing).floor() as isize;
+            let raw_max_k = ((atom.z + cutoff - self.origin[2]) / self.spacing).ceil() as isize;
+
+            if raw_max_i < 0 || raw_min_i >= self.dims[0] as isize
+                || raw_max_j < 0 || raw_min_j >= self.dims[1] as isize
+                || raw_max_k < 0 || raw_min_k >= self.dims[2] as isize
+            {
+                continue;
+            }
+
+            let min_i = raw_min_i.max(0) as usize;
+            let max_i = (raw_max_i.max(0) as usize).min(self.dims[0] - 1);
+            let min_j = raw_min_j.max(0) as usize;
+            let max_j = (raw_max_j.max(0) as usize).min(self.dims[1] - 1);
+            let min_k = raw_min_k.max(0) as usize;
+            let max_k = (raw_max_k.max(0) as usize).min(self.dims[2] - 1);
 
             for i in min_i..=max_i {
                 let gx = self.origin[0] + (i as f64) * self.spacing;
@@ -308,5 +323,83 @@ impl CavityGrid3D {
 
         pockets.sort_by(|a, b| b.volume_angstrom3.partial_cmp(&a.volume_angstrom3).unwrap());
         pockets
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cavity_grid_pocket_detection() {
+        // Construct a hollow spherical shell of protein atoms around (0, 0, 0) with radius 5.0 Å
+        let mut atoms = Vec::new();
+        let mut serial = 1;
+        for ix in -6i32..=6 {
+            for iy in -6i32..=6 {
+                for iz in -6i32..=6 {
+                    let (x, y, z) = (ix as f64, iy as f64, iz as f64);
+                    let r = (x * x + y * y + z * z).sqrt();
+                    if (4.2..=6.0).contains(&r) {
+                        atoms.push(Atom3D {
+                            serial,
+                            name: "CA".to_string(),
+                            res_name: "ALA".to_string(),
+                            chain_id: 'A',
+                            res_seq: serial as i32,
+                            x,
+                            y,
+                            z,
+                            occupancy: 1.0,
+                            b_factor: 10.0,
+                            element: "C".to_string(),
+                        });
+                        serial += 1;
+                    }
+                }
+            }
+        }
+
+        let bbox = BoundingBox3D::from_atoms(&atoms, 2.0).unwrap();
+        let mut grid = CavityGrid3D::new(&bbox, 1.0);
+        grid.populate_atoms(&atoms, 0.5);
+
+        let pockets = grid.detect_pockets(4, 8.0);
+        assert!(!pockets.is_empty());
+        let main_pocket = &pockets[0];
+        assert!(main_pocket.volume_angstrom3 >= 10.0);
+        // Center of the pocket should be near the origin (0, 0, 0)
+        assert!(main_pocket.center[0].abs() < 1.5);
+        assert!(main_pocket.center[1].abs() < 1.5);
+        assert!(main_pocket.center[2].abs() < 1.5);
+    }
+
+    #[test]
+    fn test_cavity_grid_outside_atom_and_zero_spacing() {
+        let bbox = BoundingBox3D {
+            min: [0.0, 0.0, 0.0],
+            max: [10.0, 10.0, 10.0],
+        };
+        // Zero spacing should be safely clamped without OOM or division by zero
+        let mut grid = CavityGrid3D::new(&bbox, 0.0);
+        assert!(grid.spacing >= 0.01);
+
+        // Atom completely outside grid on negative side
+        let outside_atom = Atom3D {
+            serial: 1,
+            name: "CA".to_string(),
+            res_name: "GLY".to_string(),
+            chain_id: 'A',
+            res_seq: 1,
+            x: -50.0,
+            y: -50.0,
+            z: -50.0,
+            occupancy: 1.0,
+            b_factor: 10.0,
+            element: "C".to_string(),
+        };
+        grid.populate_atoms(&[outside_atom], 1.0);
+        // Voxel (0, 0, 0) should remain unoccupied
+        assert!(!grid.occupied[0]);
     }
 }
