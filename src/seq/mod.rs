@@ -51,6 +51,11 @@ impl Dna {
         let gc_count = self.sequence.iter().filter(|&&b| b == b'G' || b == b'C').count();
         (gc_count as f64 / self.sequence.len() as f64) * 100.0
     }
+
+    /// Returns the underlying byte slice.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.sequence
+    }
 }
 
 /// An RNA sequence.
@@ -82,6 +87,11 @@ impl Rna {
         }
         let gc_count = self.sequence.iter().filter(|&&b| b == b'G' || b == b'C').count();
         gc_count as f64 / self.sequence.len() as f64
+    }
+
+    /// Returns the underlying byte slice.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.sequence
     }
 }
 
@@ -115,6 +125,11 @@ impl Protein {
         }
         let gc_count = self.sequence.iter().filter(|&&b| b == b'G' || b == b'C').count();
         gc_count as f64 / self.sequence.len() as f64
+    }
+
+    /// Returns the underlying byte slice.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.sequence
     }
 }
 

@@ -38,6 +38,16 @@ impl HlaAllele {
     }
 }
 
+/// Confidence level of the computational prediction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum PredictionConfidence {
+    /// Heuristic / PSSM anchor-based approximation.
+    Heuristic,
+    /// Machine learning / structural homology model.
+    ExperimentalCalibrated,
+}
+
 /// MHC Binding prediction result for a neoepitope candidate.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -58,6 +68,8 @@ pub struct MhcBindingResult {
     pub is_strong_binder: bool,
     /// Composite vaccine candidate immunogenicity score (0.0 to 100.0).
     pub immunogenicity_score: f64,
+    /// Confidence tier of the binding prediction.
+    pub confidence: PredictionConfidence,
 }
 
 /// Predicts MHC Class I binding affinity for a 9-mer peptide against an HLA allele.
@@ -98,6 +110,7 @@ pub fn predict_mhc_binding(
         differential_agretopicity_index: dai,
         is_strong_binder,
         immunogenicity_score,
+        confidence: PredictionConfidence::Heuristic,
     })
 }
 

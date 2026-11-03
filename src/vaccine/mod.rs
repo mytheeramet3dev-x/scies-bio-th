@@ -10,6 +10,6 @@ pub mod mhc;
 pub mod mrna_design;
 pub mod neoantigen;
 
-pub use mhc::{predict_mhc_binding, HlaAllele, MhcBindingResult};
+pub use mhc::{predict_mhc_binding, HlaAllele, MhcBindingResult, PredictionConfidence};
 pub use mrna_design::{human_codon_optimize, MrnaVaccineConstruct};
 pub use neoantigen::Neoantigen;

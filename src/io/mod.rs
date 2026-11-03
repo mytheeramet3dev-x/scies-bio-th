@@ -1,6 +1,9 @@
 pub mod gff;
 pub mod vcf;
 
+#[cfg(feature = "structure")]
+pub use crate::structure::{parse_mmcif, parse_pdb};
+
 use crate::BioError;
 use std::io::BufRead;
 

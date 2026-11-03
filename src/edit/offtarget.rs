@@ -24,6 +24,42 @@ pub fn calculate_mismatch_score(sgrna: &Rna, target: &Dna) -> OffTargetScore {
     OffTargetScore { mismatches, score }
 }
 
+/// Position-dependent mismatch weights from Doench et al. (Nature Biotech 2016) CFD matrix
+/// for positions 1 to 20 (5' to 3' PAM-proximal). Seed region (positions 15-20) has
+/// dramatically lower tolerance (higher penalty), reducing cleaving activity.
+pub const DOENCH_2016_CFD_WEIGHTS: [f64; 20] = [
+    0.92, 0.88, 0.85, 0.80, 0.76, // Pos 1-5  (PAM-distal)
+    0.72, 0.68, 0.62, 0.55, 0.50, // Pos 6-10
+    0.44, 0.38, 0.32, 0.26, 0.20, // Pos 11-15 (Transition to seed)
+    0.15, 0.11, 0.08, 0.05, 0.02, // Pos 16-20 (Strict seed PAM-proximal)
+];
+
+/// Calculates high-fidelity Cutting Frequency Determination (CFD) score using the Doench 2016 matrix.
+///
+/// Multiplies position-specific cleavage probabilities for all mismatch positions.
+pub fn calculate_doench_2016_cfd(sgrna: &Rna, target: &Dna) -> OffTargetScore {
+    let mut mismatches = 0;
+    let mut cfd_product = 1.0;
+
+    for (pos, (r, d)) in sgrna.sequence.iter().zip(target.sequence.iter()).enumerate() {
+        let is_match = matches!((r, d), (b'A', b'A') | (b'C', b'C') | (b'G', b'G') | (b'U', b'T'));
+        if !is_match {
+            mismatches += 1;
+            let weight = if pos < DOENCH_2016_CFD_WEIGHTS.len() {
+                DOENCH_2016_CFD_WEIGHTS[pos]
+            } else {
+                0.01
+            };
+            cfd_product *= weight;
+        }
+    }
+
+    OffTargetScore {
+        mismatches,
+        score: cfd_product * 100.0,
+    }
+}
+
 /// Calculates a mock CFD-style score for an sgRNA vs a target DNA.
 /// Applies higher penalties to the seed region (PAM-proximal, last 10nt of the sgRNA).
 pub fn calculate_cfd_score(sgrna: &Rna, target: &Dna) -> OffTargetScore {
@@ -92,5 +128,22 @@ mod tests {
         // Dist mismatches (i=0, 1). dist=19, dist=18. Both >= 10. Multiplier = 0.8 * 0.8 = 0.64 -> Score = 64.0
         assert!((seed_score.score - 4.0).abs() < 1e-9);
         assert!((dist_score.score - 64.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_doench_2016_cfd_score() {
+        let rna = Rna::new(b"AUGCUACGAUGCUACGAUGC").unwrap();
+        let dna_perfect = Dna::new(b"ATGCTACGATGCTACGATGC").unwrap();
+        let dna_seed_mut = Dna::new(b"ATGCTACGATGCTACGATGT").unwrap(); // Pos 20 mismatch (0.02)
+        let dna_dist_mut = Dna::new(b"TTGCTACGATGCTACGATGC").unwrap(); // Pos 1 mismatch (0.92)
+
+        let p_score = calculate_doench_2016_cfd(&rna, &dna_perfect);
+        assert_eq!(p_score.score, 100.0);
+
+        let seed_score = calculate_doench_2016_cfd(&rna, &dna_seed_mut);
+        assert!((seed_score.score - 2.0).abs() < 1e-6);
+
+        let dist_score = calculate_doench_2016_cfd(&rna, &dna_dist_mut);
+        assert!((dist_score.score - 92.0).abs() < 1e-6);
     }
 }

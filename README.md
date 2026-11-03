@@ -12,24 +12,30 @@
 ```text
 scies_bio_th::
 ├── seq            — DNA, RNA, and Protein validated sequence primitives & K-mers
-├── align          — Local (Smith-Waterman), Global (Needleman-Wunsch), Levenshtein & Hamming distances
+├── align          — Local (Smith-Waterman), Global (Needleman-Wunsch), Banded NW/SW, Levenshtein & Hamming
 ├── codon          — Universal genetic code translation, ORF & genomic region finder
-├── edit           — CRISPR-Cas9/Cas12a PAM discovery, sgRNA design, CFD off-target scoring, and PCR primer design
-├── ivg            — In Vitro Gametogenesis (IVG), Epigenetic reprogramming, SCNT cloning, Zona Pellucida & Artificial Womb
-├── vaccine        — Personalized cancer neoantigen identification, HLA/MHC Class I binding prediction, and mRNA vaccine design
+├── edit           — CRISPR-Cas9/Cas12a PAM discovery, Doench 2016 CFD matrix, and PCR primer design
+├── vaccine        — Personalized cancer neoantigen identification, HLA/MHC Class I binding & confidence tiers
 ├── motif          — Position Weight Matrix (PWM / PSSM) scanning and consensus pattern matching
 ├── hmm            — Hidden Markov Models (Viterbi decoding, sequence emission probabilities)
 ├── genome         — Genomic intervals and Interval Tree coordinate lookup
 ├── variant        — VCF parsing and genomic variation models (SNP, INDEL)
 ├── annotation     — GFF3 genomic feature parsing
-├── io             — Zero-copy FASTA, FASTQ, GFF3, and VCF streaming readers
+├── io             — Zero-copy FASTA, FASTQ, GFF3, VCF, and PDB/mmCIF streaming readers
 ├── phylo          — Phylogenetic distance matrices, UPGMA tree clustering, and Newick tree export
 ├── popgen         — Allele & genotype frequencies, Heterozygosity, and Chi-square Hardy-Weinberg testing
 ├── genomics       — K-mer spectrum counting and De Bruijn Graph unitig sequence assembly
 ├── transcriptomics— Expression normalization: Transcripts Per Million (TPM), RPKM, and CPM
 ├── proteomics     — In silico proteolytic cleavage (Trypsin, Chymotrypsin, LysC), monoisotopic mass & pI
-├── aging          — Longevity engineering, Telomere dynamics (TTAGGG), Telomerase (TERT), and Immortal genome design
-└── metagenomics   — Alpha diversity metrics: Shannon-Wiener index, Simpson, Evenness, and Chao1
+├── aging          — Longevity engineering, Telomere dynamics (TTAGGG), Telomerase (TERT), and Multi-generation simulation
+├── metagenomics   — Alpha diversity metrics: Shannon-Wiener index, Simpson, Evenness, and Chao1
+│
+├── structure      — [feature = "structure"] PDB/mmCIF parser, DSSP secondary structure, Kabsch RMSD/TM-score, Contact maps
+├── network        — [feature = "network"] Biological graphs, PPI networks & hubs, KEGG pathway DAG, Brandes centrality
+├── stats          — [feature = "stats"] Mann-Whitney U, Fisher's Exact (2x2), Chi-square, Benjamini-Hochberg FDR, Vector metrics
+├── docking        — [feature = "docking"] 3D grid cavity detection, Lennard-Jones 6-12 Van der Waals & Coulombic electrostatics
+├── epigenome      — [feature = "epigenome"] Gardiner-Garden CpG islands, Beta/M-values, ATAC-seq accessibility, ChromHMM states
+└── ivg            — [feature = "experimental"] In Vitro Gametogenesis (IVG), Epigenetic reprogramming, SCNT cloning
 ```
 
 ---

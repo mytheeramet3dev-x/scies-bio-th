@@ -1,6 +1,6 @@
 [package]
 name = "scies-bio-th"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 license = "MIT"
 description = "A high-performance, dependency-free bioinformatics toolkit for Rust."
@@ -15,6 +15,13 @@ default = []
 serde = ["dep:serde"]
 parallel = []
 interop = ["dep:scies-math"]
+structure = []
+network = []
+stats = []
+docking = ["structure"]
+epigenome = []
+experimental = []
+full = ["structure", "network", "stats", "docking", "epigenome", "experimental"]
 
 [dev-dependencies]
 criterion = "0.5"
