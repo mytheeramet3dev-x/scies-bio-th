@@ -118,16 +118,16 @@ for pep in peptides {
 }
 ```
 
-### 6. Real Genome Longevity & Synthetic Immortal Design (v0.5.0)
+### 6. Real Guide Design, Simulation & Hard Constraints (v0.6.0)
 ```rust
 use scies_bio_th::aging::{
-    design_high_fidelity_longevity_package, load_telomere_regions_from_file,
-    HighFidelityAgeParams, LongevityStrategy,
+    design_high_fidelity_longevity_package, load_loci_from_file,
+    validate_longevity_package, HighFidelityAgeParams, LongevityStrategy,
 };
 
-// 1. Analyze actual chromosome ends from public assemblies (e.g. T2T-CHM13)
-let regions = load_telomere_regions_from_file("testdata/t2t_chr5_telomere_tert.fasta", &["chr5"])?;
-println!("Canonical Telomeric Repeats: {}", regions[0].analysis.canonical_repeats_count);
+// 1. Load real genomic target loci from T2T-CHM13
+let tert_loci = load_loci_from_file("testdata/t2t_chr5_telomere_tert.fasta")?;
+let tert_dna = &tert_loci[1].1;
 
 // 2. High-Fidelity multi-factor longevity intervention design
 let subject = HighFidelityAgeParams {
@@ -137,7 +137,15 @@ let subject = HighFidelityAgeParams {
     gamma_h2ax_foci: 2.2,
     sasp_burden: 0.45,
 };
-let report = design_high_fidelity_longevity_package(&subject, LongevityStrategy::Balanced, None);
+let report = design_high_fidelity_longevity_package(
+    &subject,
+    LongevityStrategy::Balanced,
+    Some(&[("TERT", tert_dna)]),
+);
+
+// 3. Pre-flight clinical constraints validation
+let validation = validate_longevity_package(&report);
+assert!(validation.is_valid);
 println!("{}", report.export_detailed_summary());
 ```
 

@@ -3,20 +3,18 @@
 //! Demonstrates:
 //! 1. Loading actual terminal telomere and promoter sequences from T2T-CHM13 assembly files.
 //! 2. Profiling canonical TTAGGG / CCCTAA repeats and subtelomeric variant transitions.
-//! 3. Running Design Engine 2.0 (High-Fidelity) with exact coordinates, PAMs, and CFD evaluations.
-//! 4. Enforcing clinical oncogenic safety locks and sequential intervention ordering.
+//! 3. Designing real SpCas9 sgRNAs with homopolymer (poly-T / poly-G) filters and CFD scoring.
+//! 4. Enforcing hard biological safety constraints (Super-p53 and checkpoint primacy).
+//! 5. Simulating multi-generation cell population dynamics over 50 generations.
+//! 6. Running pre-flight clinical safety validation.
 
 use scies_bio_th::aging::{
-    design_high_fidelity_longevity_package, load_telomere_regions_from_file,
-    HighFidelityAgeParams, LongevityStrategy,
+    design_high_fidelity_longevity_package, load_loci_from_file, load_telomere_regions_from_file,
+    validate_longevity_package, HighFidelityAgeParams, LongevityStrategy,
 };
-use scies_bio_th::io::read_fasta_record_matching;
-use scies_bio_th::seq::Dna;
-use std::fs::File;
-use std::io::BufReader;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🧬 scies-bio-th — Real Genome Integration & High-Fidelity Longevity Design (v0.5.0)\n");
+    println!("🧬 scies-bio-th — Real Guide Design, Simulation & Hard Constraints (v0.6.0)\n");
 
     // 1. Load and analyze real terminal telomeres from T2T-CHM13 public genome sample
     let telomere_file = "testdata/t2t_chr5_telomere_tert.fasta";
@@ -38,24 +36,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!();
 
-    // 2. Extract Real Loci Sequences for Precision sgRNA Targeting
+    // 2. Extract Real Genomic Target Loci from T2T-CHM13 Testdata
     println!("2. Extracting Real Genomic Target Loci from T2T-CHM13...");
-    
-    // TERT promoter from chr5 FASTA
-    let f1 = File::open("testdata/t2t_chr5_telomere_tert.fasta")?;
-    let r1 = BufReader::new(f1);
-    let tert_record = read_fasta_record_matching(r1, |id| id.contains("tert_promoter"))?
-        .ok_or("Failed to locate TERT promoter in testdata")?;
-    let tert_dna = Dna::new(&tert_record.sequence)?;
-    println!("   Extracted TERT Promoter locus: {} bp", tert_dna.sequence.len());
 
-    // SIRT6 locus from chr19 FASTA
-    let f2 = File::open("testdata/t2t_chr19_sirt6.fasta")?;
-    let r2 = BufReader::new(f2);
-    let sirt6_record = read_fasta_record_matching(r2, |id| id.contains("sirt6_locus"))?
-        .ok_or("Failed to locate SIRT6 locus in testdata")?;
-    let sirt6_dna = Dna::new(&sirt6_record.sequence)?;
-    println!("   Extracted SIRT6 Regulatory locus: {} bp\n", sirt6_dna.sequence.len());
+    let tert_loci = load_loci_from_file("testdata/t2t_chr5_telomere_tert.fasta")?;
+    let sirt6_loci = load_loci_from_file("testdata/t2t_chr19_sirt6.fasta")?;
+    let tp53_loci = load_loci_from_file("testdata/t2t_chr17_tp53.fasta")?;
+    let cdkn2a_loci = load_loci_from_file("testdata/t2t_chr9_cdkn2a.fasta")?;
+    let foxo3_loci = load_loci_from_file("testdata/t2t_chr6_foxo3.fasta")?;
+
+    let tert_dna = &tert_loci.iter().find(|(id, _)| id.contains("tert_promoter")).unwrap().1;
+    let sirt6_dna = &sirt6_loci.iter().find(|(id, _)| id.contains("sirt6_locus")).unwrap().1;
+    let tp53_dna = &tp53_loci.first().unwrap().1;
+    let cdkn2a_dna = &cdkn2a_loci.first().unwrap().1;
+    let foxo3_dna = &foxo3_loci.first().unwrap().1;
+
+    println!("   Loaded TERT Promoter ({} bp)", tert_dna.sequence.len());
+    println!("   Loaded SIRT6 Locus ({} bp)", sirt6_dna.sequence.len());
+    println!("   Loaded TP53 Locus ({} bp)", tp53_dna.sequence.len());
+    println!("   Loaded CDKN2A Locus ({} bp)", cdkn2a_dna.sequence.len());
+    println!("   Loaded FOXO3 Locus ({} bp)\n", foxo3_dna.sequence.len());
+
+    let real_loci = [
+        ("TERT", tert_dna),
+        ("SIRT6", sirt6_dna),
+        ("TP53", tp53_dna),
+        ("CDKN2A", cdkn2a_dna),
+        ("FOXO3", foxo3_dna),
+    ];
 
     // 3. Clinical Subject Baseline Parameters (Middle-aged subject with accelerated aging)
     let subject_baseline = HighFidelityAgeParams {
@@ -67,18 +75,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("3. Running High-Fidelity Longevity Design Pipeline (Strategy: Balanced)...");
-    let real_loci = [
-        ("TERT", &tert_dna),
-        ("SIRT6", &sirt6_dna),
-    ];
-
     let report = design_high_fidelity_longevity_package(
         &subject_baseline,
         LongevityStrategy::Balanced,
         Some(&real_loci),
     );
 
-    // 4. Output Detailed Structured Report
+    // 4. Pre-Flight Clinical Validation
+    println!("4. Performing Pre-Flight Biological Constraints Validation...");
+    let validation = validate_longevity_package(&report);
+    println!("   Validation Status: {}", if validation.is_valid { "PASSED (Ready for Synthesis)" } else { "FAILED" });
+    if !validation.warnings.is_empty() {
+        println!("   Advisories: {} recorded", validation.warnings.len());
+    }
+    println!();
+
+    // 5. Output Detailed Structured Report
     println!("{}", report.export_detailed_summary());
 
     println!("✅ Real-genome high-fidelity longevity pipeline executed successfully!");

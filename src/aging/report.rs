@@ -3,10 +3,12 @@
 //! Generates comprehensive multi-tiered reports containing exact genomic coordinates,
 //! candidate sgRNA guides, CFD off-target evaluations, confidence metrics, and ordered execution workflows.
 
+use crate::aging::constraints::ConstraintViolation;
 use crate::aging::design::{EditType, LongevityStrategy};
 use crate::aging::fidelity::HighFidelityAgeResult;
+use crate::aging::guide::RealGuide;
 use crate::aging::risk::OncogenicRiskAssessment;
-use crate::edit::crispr::SgRnaCandidate;
+use crate::aging::simulation::SimulationTrajectory;
 use crate::genome::Strand;
 use crate::seq::Dna;
 
@@ -37,8 +39,8 @@ pub struct HighFidelityProposedEdit {
     pub priority: u8,
     /// Strict sequential execution order (1 = safety locks first, 2 = telomere renewal, etc.).
     pub execution_step: u8,
-    /// Engineered candidate sgRNA with PAM and cleavage coordinates.
-    pub recommended_sgrna: Option<SgRnaCandidate>,
+    /// Real candidate sgRNA with PAM and homopolymer / GC metrics.
+    pub recommended_sgrna: Option<RealGuide>,
     /// CFD off-target penalty score (0.0 = safe, 100.0 = high off-target potential).
     pub offtarget_score: f64,
     /// Composite engineering confidence score (0.0 to 1.0) factoring guide GC, CFD, and accessibility.
@@ -85,6 +87,10 @@ pub struct HighFidelityDesignReport {
     pub proposed_edits: Vec<HighFidelityProposedEdit>,
     /// Pathway-specific oncogenic hazard evaluation and safety locks.
     pub oncogenic_risk: OncogenicRiskAssessment,
+    /// Optional multi-generation cell population simulation trajectory.
+    pub multi_generation_trajectory: Option<SimulationTrajectory>,
+    /// Biological hard constraints audit log and remediations applied.
+    pub constraint_audit: Vec<ConstraintViolation>,
 }
 
 impl HighFidelityDesignReport {
@@ -136,6 +142,30 @@ impl HighFidelityDesignReport {
             self.oncogenic_risk.raw_pathways.chromosomal_instability_risk
         ));
 
+        if let Some(ref sim) = self.multi_generation_trajectory {
+            out.push_str("\n--- Multi-Generation Cell Population Simulation (50 Generations) ---\n");
+            out.push_str(&format!(
+                "Population Viability: {} | Crisis Alarm: {} | Doublings: {}\n",
+                if sim.is_population_viable { "SUSTAINED" } else { "DEPLETED" },
+                if sim.crisis_alarm_triggered { "ACTIVE (CRITICAL)" } else { "CLEAR (NORMAL)" },
+                sim.doublings_achieved
+            ));
+            out.push_str(&sim.summary_overview());
+        }
+
+        out.push_str("\n--- Biological Safety Constraints & Audit ---\n");
+        if self.constraint_audit.is_empty() {
+            out.push_str("Status: ALL HARD SAFETY CONSTRAINTS SATISFIED (0 Violations)\n");
+        } else {
+            out.push_str(&format!("Status: {} Auto-Remediated Constraint Actions\n", self.constraint_audit.len()));
+            for v in &self.constraint_audit {
+                out.push_str(&format!(
+                    " - [{:?}] {}: {}\n   Remediation: {}\n",
+                    v.severity, v.affected_gene, v.message, v.remediation_applied
+                ));
+            }
+        }
+
         out.push_str("\n--- Sequential Intervention Workflow (Step-by-Step) ---\n");
         let mut sorted_edits = self.proposed_edits.clone();
         sorted_edits.sort_by_key(|e| (e.execution_step, e.priority));
@@ -160,9 +190,16 @@ impl HighFidelityDesignReport {
             ));
             if let Some(ref guide) = edit.recommended_sgrna {
                 out.push_str(&format!(
-                    "   sgRNA Guide (20nt): {} | PAM @ {}\n",
+                    "   sgRNA Guide (20nt): {} | PAM: {} @ {}\n",
                     String::from_utf8_lossy(&guide.sequence.sequence),
+                    guide.pam_motif,
                     guide.pam_index
+                ));
+                out.push_str(&format!(
+                    "   Guide GC: {:.1}% | Poly-T: {} | Poly-G: {}\n",
+                    guide.gc_content * 100.0,
+                    guide.has_poly_t_terminator,
+                    guide.has_poly_g_quadruplex
                 ));
             }
         }

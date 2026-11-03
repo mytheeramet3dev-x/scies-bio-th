@@ -236,6 +236,26 @@ pub fn load_telomere_regions_from_file(
     Ok(filtered)
 }
 
+/// Loads all genomic locus records from a buffered FASTA stream as `(identifier, Dna)`.
+pub fn load_loci_from_fasta<R: BufRead>(reader: R) -> crate::Result<Vec<(String, Dna)>> {
+    let fasta = FastaReader::new(reader)?;
+    let mut loci = Vec::new();
+    for res in fasta {
+        let record = res?;
+        let dna = Dna::new(&record.sequence)?;
+        loci.push((record.id, dna));
+    }
+    Ok(loci)
+}
+
+/// Loads all genomic locus records from a FASTA file on disk.
+pub fn load_loci_from_file(file_path: &str) -> crate::Result<Vec<(String, Dna)>> {
+    let file = std::fs::File::open(file_path)
+        .map_err(|e| crate::BioError::IoError(format!("Failed to open FASTA file '{}': {}", file_path, e)))?;
+    let reader = std::io::BufReader::new(file);
+    load_loci_from_fasta(reader)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

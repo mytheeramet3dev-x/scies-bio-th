@@ -4,15 +4,18 @@
 //! and produces an integrated LongevityDesignReport balancing replicative immortalization against oncogenesis.
 
 use crate::aging::clock::{estimate_biological_age, AgingProfile};
+use crate::aging::constraints::enforce_and_auto_remediate;
 use crate::aging::fidelity::{
     apply_high_fidelity_telomerase, estimate_high_fidelity_biological_age,
     simulate_high_fidelity_shortening, HighFidelityAgeParams, TelomeraseKinetics,
 };
+use crate::aging::guide::{design_real_guides, select_optimal_guide};
 use crate::aging::pathways::find_longevity_gene;
 use crate::aging::report::{
     HighFidelityDesignReport, HighFidelityProposedEdit, LongevityMetricsComparison,
 };
 use crate::aging::risk::{evaluate_oncogenic_risk, SafetyLocks};
+use crate::aging::simulation::{run_multi_generation_simulation, MultiGenerationSimulationConfig};
 use crate::aging::telomerase::{apply_telomerase, TelomeraseActivity};
 use crate::edit::crispr::{generate_sgrna_candidates, SgRnaCandidate};
 use crate::edit::offtarget::calculate_cfd_score;
@@ -341,28 +344,14 @@ pub fn design_high_fidelity_longevity_package(
                       execution_step: u8|
      -> HighFidelityProposedEdit {
         let target_sequence = get_target_seq(gene_symbol, default_dna);
-        let sgrna_candidates = generate_sgrna_candidates(&target_sequence);
-
-        let mut best_guide = None;
-        let mut best_gc_diff = 1.0;
-        for cand in sgrna_candidates {
-            let gc = cand.sequence.gc_content();
-            let diff = (gc - 0.50).abs();
-            if diff < best_gc_diff {
-                best_gc_diff = diff;
-                best_guide = Some(cand);
-            }
-        }
+        let candidates = design_real_guides(&target_sequence, strand, start_pos);
+        let best_guide = select_optimal_guide(&candidates);
 
         let (offtarget_score, confidence) = if let Some(ref guide) = best_guide {
-            let cfd = calculate_cfd_score(&guide.sequence, &target_sequence);
-            let offtarget_penalty = (100.0 - cfd.score).clamp(1.0, 50.0);
-            let gc_quality = 1.0 - best_gc_diff * 1.8;
-            let cfd_quality = (cfd.score / 100.0).clamp(0.2, 1.0);
-            let conf = (0.5 * gc_quality + 0.5 * cfd_quality).clamp(0.25, 0.98);
-            (offtarget_penalty, conf)
+            let penalty = (100.0 - guide.offtarget_cfd_score).clamp(1.0, 50.0);
+            (penalty, guide.confidence_score)
         } else {
-            (15.0, 0.50)
+            (15.0, 0.45)
         };
 
         HighFidelityProposedEdit {
@@ -666,7 +655,7 @@ pub fn design_high_fidelity_longevity_package(
     let projected_age_result = estimate_high_fidelity_biological_age(&projected_params);
 
     // Safeguards & Oncogenic Risk
-    let safeguards = match strategy {
+    let mut safeguards = match strategy {
         LongevityStrategy::Conservative => SafetyLocks::standard_protection(),
         LongevityStrategy::Balanced => SafetyLocks::standard_protection(),
         LongevityStrategy::Aggressive => SafetyLocks {
@@ -677,12 +666,43 @@ pub fn design_high_fidelity_longevity_package(
         },
     };
 
+    let mut telomerase_effective = telomerase_level;
+    let constraint_audit = enforce_and_auto_remediate(
+        &mut proposed_edits,
+        strategy,
+        &mut telomerase_effective,
+        &mut safeguards,
+    );
+
     let offtarget_fractions: Vec<f64> = proposed_edits.iter().map(|e| e.offtarget_score / 100.0).collect();
     let oncogenic_risk = evaluate_oncogenic_risk(
-        telomerase_level,
+        telomerase_effective,
         &offtarget_fractions,
         projected_capping,
         &safeguards,
+    );
+
+    // Multi-generation cell population simulation (50 generations)
+    let sim_config = MultiGenerationSimulationConfig {
+        total_generations: 50,
+        oxidative_stress: 1.0,
+        replication_stress_g4: 0.8,
+        telomerase_expression: telomerase_effective,
+        telomerase_processivity: match strategy {
+            LongevityStrategy::Conservative => 0.0,
+            LongevityStrategy::Balanced => 52.0,
+            LongevityStrategy::Aggressive => 70.0,
+        },
+        has_super_p53: safeguards.super_p53_active,
+        has_suicide_switch: safeguards.inducible_suicide_switch,
+        senolytic_clearance_rate: if proposed_edits.iter().any(|e| e.edit_type == EditType::SenescenceClearance) { 0.12 } else { 0.02 },
+        critical_hayflick_limit_bp: 3_800.0,
+    };
+
+    let trajectory = run_multi_generation_simulation(
+        subject.telomere_length_bp,
+        baseline_age_result.composite_biological_age,
+        &sim_config,
     );
 
     let metrics = LongevityMetricsComparison {
@@ -704,6 +724,8 @@ pub fn design_high_fidelity_longevity_package(
         age_breakdown: baseline_age_result,
         proposed_edits,
         oncogenic_risk,
+        multi_generation_trajectory: Some(trajectory),
+        constraint_audit,
     }
 }
 
