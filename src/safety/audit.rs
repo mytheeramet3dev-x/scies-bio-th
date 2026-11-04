@@ -7,6 +7,34 @@ use crate::safety::oncogene::{evaluate_oncogenic_activation_risk, OncogeneInterv
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+/// Recommended guard action for autonomous closed-loop intervention controllers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GuardAction {
+    /// Nominal parameters within safe physiological window: continue protocol.
+    Continue,
+    /// Mild or moderate biomarker drift: reduce factor dosage or pulse duration by 25-50%.
+    TitrateDown,
+    /// Insufficient washout or factor accumulation: pause protocol to allow recovery.
+    PauseWashout,
+    /// High oncogenic risk, extreme dedifferentiation or c-Myc inclusion: abort protocol and activate suicide switch.
+    AbortSuicideSwitch,
+}
+
+/// Standardized safety coupling payload returned by all longevity and aging interventions.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct InterventionSafetyCoupling {
+    /// Composite oncogenic transformation risk ($0.0\text{--}1.0$).
+    pub oncogenic_risk: f64,
+    /// Functional stem cell pool fraction ($0.0\text{--}1.0$, normal physiological range: $0.03\text{--}0.12$).
+    pub stem_pool_fraction: f64,
+    /// Somatic lineage identity retention fraction ($0.0\text{--}1.0$).
+    pub identity_retention: f64,
+    /// Recommended closed-loop safety guard action.
+    pub recommended_guard_action: GuardAction,
+}
+
 /// Severity of a safety audit rule violation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

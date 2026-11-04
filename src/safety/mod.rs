@@ -7,8 +7,8 @@ pub mod immune;
 pub mod oncogene;
 
 pub use audit::{
-    evaluate_intervention_safety, AuditRuleResult, AuditSeverity, SafetyAuditReport, SafetyContext,
-    SafetyRule,
+    evaluate_intervention_safety, AuditRuleResult, AuditSeverity, GuardAction,
+    InterventionSafetyCoupling, SafetyAuditReport, SafetyContext, SafetyRule,
 };
 pub use checkpoint::{
     evaluate_checkpoint_activation, CellFateDecision, CheckpointInput, CheckpointResponse,

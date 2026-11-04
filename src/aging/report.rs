@@ -102,6 +102,12 @@ pub struct HighFidelityDesignReport {
     pub proposed_edits: Vec<HighFidelityProposedEdit>,
     /// Pathway-specific oncogenic hazard evaluation and safety locks.
     pub oncogenic_risk: OncogenicRiskAssessment,
+    /// Estimated stem cell pool fraction across target tissues.
+    pub stem_pool_fraction: f64,
+    /// Somatic identity retention index.
+    pub identity_retention: f64,
+    /// Recommended autonomous guard action.
+    pub recommended_guard_action: crate::safety::GuardAction,
     /// Optional multi-generation cell population simulation trajectory.
     pub multi_generation_trajectory: Option<SimulationTrajectory>,
     /// Biological hard constraints audit log and remediations applied.
@@ -109,6 +115,16 @@ pub struct HighFidelityDesignReport {
 }
 
 impl HighFidelityDesignReport {
+    /// Extracts the standardized intervention safety coupling payload.
+    pub fn safety_coupling(&self) -> crate::safety::InterventionSafetyCoupling {
+        crate::safety::InterventionSafetyCoupling {
+            oncogenic_risk: self.oncogenic_risk.net_risk_index,
+            stem_pool_fraction: self.stem_pool_fraction,
+            identity_retention: self.identity_retention,
+            recommended_guard_action: self.recommended_guard_action,
+        }
+    }
+
     /// Generates a comprehensive human-readable summary report.
     pub fn export_detailed_summary(&self) -> String {
         let mut out = String::new();

@@ -76,13 +76,31 @@ impl CardiovascularCycle {
         self.central_venous_pressure_mmhg = cvp;
 
         // 2. Frank-Starling Ventricular Beat
-        let afterload = (self.mean_arterial_pressure_mmhg / 90.0).clamp(0.7, 2.0);
+        let afterload = (self.mean_arterial_pressure_mmhg / 90.0).clamp(0.7, 1.8);
         let beat = heart.simulate_cardiac_cycle(self.heart_rate_bpm, cvp, afterload);
         self.stroke_volume_ml = beat.stroke_volume_ml;
         self.ejection_fraction_pct = beat.ejection_fraction_pct;
-        self.cardiac_output_l_min = beat.cardiac_output_l_min;
 
-        // 3. Arterial Hemodynamics & Windkessel
+        // 3. Microvascular Endothelial Resistance & Baroreflex Autonomic Balance
+        let enos_deficit = (0.88 - artery.vascular.enos_activity).max(0.0);
+        let rarefaction = (0.88 - artery.vascular.capillary_density).max(0.0);
+        // Carotid Sinus / Aortic Arch Baroreceptor Reflex resets upward in chronic arterial stiffening
+        let stiffness_reset = 0.20 * (artery.ecm.youngs_modulus_kpa - 30.0).max(0.0);
+        let setpoint_map = (90.0 + stiffness_reset).clamp(88.0, 106.0);
+        let delta_p = self.mean_arterial_pressure_mmhg - setpoint_map;
+        self.baroreceptor_firing_rate_hz = (50.0 + 1.8 * delta_p).clamp(10.0, 100.0);
+
+        let symp = (0.35 - 0.006 * delta_p + 0.18 * rarefaction).clamp(0.15, 0.80);
+        let vagal = (0.65 + 0.006 * delta_p - 0.18 * rarefaction).clamp(0.20, 0.88);
+        self.sympathetic_tone = symp;
+        self.parasympathetic_tone = vagal;
+
+        self.heart_rate_bpm = (68.0 + 32.0 * (symp - 0.35) - 20.0 * (vagal - 0.65)).clamp(52.0, 150.0);
+        self.cardiac_output_l_min = (self.stroke_volume_ml * self.heart_rate_bpm) / 1000.0;
+        self.systemic_vascular_resistance_wood =
+            (18.2 + 6.0 * (symp - 0.35) + 8.5 * enos_deficit + 7.5 * rarefaction).clamp(12.0, 28.5);
+
+        // 4. Arterial Hemodynamics & Windkessel (evaluated with synchronized HR, CO, and SVR)
         let hemo = artery.simulate_arterial_hemodynamics(
             self.stroke_volume_ml,
             self.cardiac_output_l_min,
@@ -91,25 +109,6 @@ impl CardiovascularCycle {
         self.systolic_bp_mmhg = hemo.systolic_bp_mmhg;
         self.diastolic_bp_mmhg = hemo.diastolic_bp_mmhg;
         self.mean_arterial_pressure_mmhg = hemo.mean_arterial_pressure_mmhg;
-
-        // 4. Carotid Sinus / Aortic Arch Baroreceptor Reflex
-        // Baroreceptors fire at higher frequency when MAP rises, suppressing sympathetic tone
-        let setpoint_map = 93.0;
-        let delta_p = self.mean_arterial_pressure_mmhg - setpoint_map;
-        self.baroreceptor_firing_rate_hz = (50.0 + 1.8 * delta_p).clamp(10.0, 100.0);
-
-        // Baroreflex adjustment of autonomic tone
-        let symp = (0.35 - 0.008 * delta_p).clamp(0.10, 0.85);
-        let vagal = (0.65 + 0.008 * delta_p).clamp(0.15, 0.90);
-        self.sympathetic_tone = symp;
-        self.parasympathetic_tone = vagal;
-
-        // Heart rate and SVR modulated by baroreflex autonomic balance + microvascular endothelial tone
-        self.heart_rate_bpm = (72.0 + 35.0 * (symp - 0.35) - 25.0 * (vagal - 0.65)).clamp(48.0, 160.0);
-        let enos_deficit = (0.85 - artery.vascular.enos_activity).max(0.0);
-        let rarefaction = (0.85 - artery.vascular.capillary_density).max(0.0);
-        self.systemic_vascular_resistance_wood =
-            (16.5 + 8.0 * (symp - 0.35) + 8.5 * enos_deficit + 6.5 * rarefaction).clamp(10.0, 28.0);
     }
 }
 

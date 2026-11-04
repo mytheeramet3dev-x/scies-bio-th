@@ -30,7 +30,9 @@
 //!   integrating cardiovascular, cardiopulmonary, enterohepatic, renal-RAAS, neuroendocrine-glymphatic,
 //!   immune-lymphatic, and energy-thermoregulatory systems ([`WholeBodySystemicCircuits`]).
 
+pub mod anchors;
 pub mod behavior;
+pub mod coupling;
 pub mod cycles;
 pub mod ecm;
 pub mod organ;
@@ -38,6 +40,13 @@ pub mod physiology;
 pub mod spatial;
 pub mod transport;
 
+pub use anchors::{
+    audit_clinical_reference_anchors, ClinicalAnchorCheck, ClinicalBiomarkerValues,
+    ClinicalReferenceAuditReport, ReferenceRange, REF_EGFR_YOUTHFUL, REF_FASTING_GLUCOSE_NORMAL,
+    REF_OGTT_2H_GLUCOSE_NORMAL, REF_SASP_YOUTHFUL, REF_SKIN_STIFFNESS_YOUTH,
+    REF_SYSTOLIC_BP_NORMAL, REF_TELOMERE_AGED, REF_TELOMERE_MIDDLE_AGE, REF_TELOMERE_YOUNG_ADULT,
+    REF_THYMIC_NAIVE_T_OUTPUT_YOUTH,
+};
 pub use behavior::{
     AdrenalSteroidMetrics, ArterialHemodynamicsMetrics, BrownAdiposeMetrics, CardiacCycleMetrics,
     ChoroidCsfMetrics, CorticalCognitiveMetrics, CutaneousBarrierMetrics,
@@ -47,6 +56,7 @@ pub use behavior::{
     PulmonaryGasExchangeMetrics, RenalFiltrationMetrics, SplenicImmunityMetrics,
     ThymicSelectionMetrics, VisceralAdiposeMetrics,
 };
+pub use coupling::{propagate_cross_organ_coupling, SystemicCouplingMetrics};
 pub use cycles::{
     CardiopulmonaryCycle, CardiovascularCycle, EnergyThermoregulatoryCycle,
     EnterohepaticMetabolicCycle, ImmuneLymphaticCycle, NeuroendocrineGlymphaticCycle,
@@ -57,7 +67,8 @@ pub use organ::{
     AdrenalSuprarenalOrgan, AnatomicalOrgan, AnatomicalSpatialAtlas, ArterialVascularOrgan,
     BoneMarrowNicheOrgan, CerebralCortexOrgan, ChoroidPlexusCsfOrgan, DermalCutaneousOrgan,
     GastrointestinalCryptOrgan, HepaticLobuleOrgan, HippocampalDentateGyrusOrgan,
-    HypothalamicNeuroendocrineOrgan, MyocardialVentricularOrgan, OrganArchitecture,
+    HypothalamicNeuroendocrineOrgan, MyocardialVentricularOrgan, OrganAgingRateParams,
+    OrganArchitecture, OrganBiomarkerSet, OrganInterventionResponseCoefficients,
     PancreaticIsletOrgan, PituitaryHypophysealOrgan, PulmonaryAlveolarOrgan, RenalNephronOrgan,
     SkeletalMuscleFascicleOrgan, SplenicLymphoidPulpOrgan, ThermogenicBrownAdiposeOrgan,
     ThymicLymphoidOrgan, VisceralWhiteAdiposeOrgan,

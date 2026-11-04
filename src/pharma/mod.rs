@@ -4,5 +4,8 @@
 pub mod pkpd;
 
 pub use pkpd::{
-    evaluate_hill_response, simulate_pkpd_regimen, PkPdParameters, PkPdRegimenReport,
+    evaluate_hill_response, simulate_pkpd_regimen, simulate_two_compartment_pkpd,
+    AdvancedPkPdReport, AgingLeverModulation, DosingEvent, HillPharmacodynamics,
+    IntermittentDosingSchedule, PkPdParameters, PkPdRegimenReport, RegimenDosingRecommendation,
+    TwoCompartmentPk,
 };

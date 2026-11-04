@@ -5,6 +5,7 @@
 
 use crate::genome::Strand;
 use crate::io::{FastaReader, FastaRecord};
+use crate::seq::sha256::compute_sha256_hex;
 use crate::seq::Dna;
 use std::io::BufRead;
 
@@ -277,6 +278,132 @@ pub fn load_loci_from_file(file_path: &str) -> crate::Result<Vec<(String, Dna)>>
     load_loci_from_fasta(reader)
 }
 
+/// Provenance and coordinate metadata associated with a real genomic locus extracted from reference FASTA.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct RealLocusMetadata {
+    /// Genome assembly version (e.g., "T2T-CHM13v2.0" or "GRCh38.p14").
+    pub assembly: String,
+    /// Chromosome identifier (e.g., "chr5", "chr19").
+    pub chrom: String,
+    /// 0-based inclusive start coordinate.
+    pub start: u64,
+    /// 0-based exclusive end coordinate.
+    pub end: u64,
+    /// Strand orientation.
+    pub strand: Strand,
+    /// Cryptographic SHA-256 hash of the source file from which this locus was loaded.
+    pub source_file_hash: String,
+    /// HGNC gene symbol if annotated (e.g., Some("TERT")).
+    pub gene_symbol: Option<String>,
+}
+
+/// A parsed real genomic locus with validated sequence and reference metadata.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct RealGenomicLocus {
+    pub id: String,
+    pub sequence: Dna,
+    pub metadata: RealLocusMetadata,
+}
+
+/// Loads all real genomic locus records from a FASTA file on disk, extracting coordinate/assembly metadata
+/// and recording the cryptographic SHA-256 hash of the source file.
+pub fn load_real_genomic_loci_from_file(file_path: &str) -> crate::Result<Vec<RealGenomicLocus>> {
+    let raw_bytes = std::fs::read(file_path)
+        .map_err(|e| crate::BioError::IoError(format!("Failed to read FASTA file '{}': {}", file_path, e)))?;
+    let file_hash = compute_sha256_hex(&raw_bytes);
+
+    let reader = std::io::BufReader::new(raw_bytes.as_slice());
+    let fasta = FastaReader::new(reader)?;
+    let mut loci = Vec::new();
+
+    for res in fasta {
+        let record = res?;
+        let dna = Dna::new(&record.sequence)?;
+        let header = &record.id;
+
+        // Parse assembly, e.g. [assembly=GRCh38.p14] or [assembly=T2T-CHM13v2.0]
+        let assembly = if let Some(idx) = header.find("assembly=") {
+            let rem = &header[idx + 9..];
+            let end_idx = rem.find(']').unwrap_or(rem.len());
+            rem[..end_idx].trim().to_string()
+        } else if header.contains("T2T") {
+            "T2T-CHM13v2.0".to_string()
+        } else {
+            "GRCh38.p14".to_string()
+        };
+
+        // Parse coordinates: chrX:start-end
+        let (chrom, start, end) = parse_chrom_coordinates(&header).unwrap_or_else(|| {
+            let chr = if record.id.contains("chr") {
+                let parts: Vec<&str> = record.id.split('_').collect();
+                parts.iter().find(|p| p.starts_with("chr")).copied().unwrap_or("chrUnknown").to_string()
+            } else {
+                "chrUnknown".to_string()
+            };
+            (chr, 1, 1 + dna.sequence.len() as u64)
+        });
+
+        // Parse gene symbol: [gene=...] or infer from id
+        let gene_symbol = if let Some(idx) = header.find("gene=") {
+            let rem = &header[idx + 5..];
+            let end_idx = rem.find(']').unwrap_or(rem.len());
+            let sym = rem[..end_idx].trim();
+            Some(sym.to_string())
+        } else {
+            infer_gene_from_id(&record.id)
+        };
+
+        let metadata = RealLocusMetadata {
+            assembly,
+            chrom,
+            start,
+            end,
+            strand: Strand::Forward,
+            source_file_hash: file_hash.clone(),
+            gene_symbol,
+        };
+
+        loci.push(RealGenomicLocus {
+            id: record.id,
+            sequence: dna,
+            metadata,
+        });
+    }
+
+    Ok(loci)
+}
+
+fn parse_chrom_coordinates(header: &str) -> Option<(String, u64, u64)> {
+    for token in header.split_whitespace() {
+        if let Some(colon_idx) = token.find(':') {
+            let chrom = token[..colon_idx].trim_start_matches('>').to_string();
+            let coords = &token[colon_idx + 1..];
+            if let Some(dash_idx) = coords.find('-') {
+                let start_str = coords[..dash_idx].replace(',', "");
+                let end_str = coords[dash_idx + 1..].replace(',', "");
+                if let (Ok(start), Ok(end)) = (start_str.parse::<u64>(), end_str.parse::<u64>()) {
+                    return Some((chrom, start, end));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn infer_gene_from_id(id: &str) -> Option<String> {
+    let lower = id.to_ascii_lowercase();
+    for gene in &[
+        "tert", "sirt6", "tp53", "cdkn2a", "foxo3", "parp1", "pot1", "lmna", "atm", "terc", "mtor",
+    ] {
+        if lower.contains(gene) {
+            return Some(gene.to_ascii_uppercase());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +445,18 @@ mod tests {
         assert_eq!(reg.strand, Strand::Reverse);
         assert_eq!(reg.analysis.canonical_repeats_count, 10);
         assert_eq!(reg.analysis.variant_repeats_count, 2);
+    }
+
+    #[test]
+    fn test_load_real_genomic_loci_with_metadata_and_provenance_hash() {
+        let loci = load_real_genomic_loci_from_file("testdata/t2t_chr5_telomere_tert.fasta").unwrap();
+        assert!(!loci.is_empty());
+        let tert = loci.iter().find(|l| l.id.contains("tert")).unwrap();
+        assert_eq!(tert.metadata.chrom, "chr5");
+        assert_eq!(tert.metadata.assembly, "GRCh38.p14");
+        assert_eq!(tert.metadata.start, 1294801);
+        assert_eq!(tert.metadata.end, 1295600);
+        assert_eq!(tert.metadata.gene_symbol.as_deref(), Some("ENSG00000164362"));
+        assert_eq!(tert.metadata.source_file_hash.len(), 64);
     }
 }

@@ -28,8 +28,9 @@ pub mod vascular;
 
 pub use clock::{
     calculate_aging_acceleration, estimate_biological_age, estimate_horvath_cpg_clock_age,
-    horvath_age_transform, horvath_anti_trafo, AgingProfile, HorvathCpGProbe,
-    CANONICAL_AGE_CPG_PROBES, HORVATH_ADULT_AGE_YEARS,
+    horvath_353_cpg_sites, horvath_age_transform, horvath_anti_trafo, AgingProfile,
+    Horvath353CpGSite, HorvathCpGProbe, CANONICAL_AGE_CPG_PROBES, HORVATH_353_SITE_COUNT,
+    HORVATH_ADULT_AGE_YEARS,
 };
 pub use constraints::{
     enforce_and_auto_remediate, validate_biological_constraints, ConstraintSeverity,
@@ -44,7 +45,10 @@ pub use fidelity::{
     simulate_high_fidelity_shortening, HighFidelityAgeParams, HighFidelityAgeResult,
     HighFidelityTelomereState, TelomeraseKinetics,
 };
-pub use guide::{design_real_guides, select_optimal_guide, RealGuide};
+pub use guide::{
+    compute_on_target_score, design_real_cas12a_guides, design_real_guides, design_real_guides_all,
+    evaluate_offtarget_site_cfd, select_optimal_guide, CrisprNuclease, RealGuide,
+};
 pub use immune::ImmunosenescenceState;
 pub use niche::{
     compute_stem_division_dynamics, evaluate_niche_competence, StemCellNicheState,
@@ -56,7 +60,8 @@ pub use pathways::{
 pub use proteostasis::{autophagy_clearance, chaperone_refolding, ProteostasisState};
 pub use real_genome::{
     analyze_real_telomere, load_loci_from_fasta, load_loci_from_file,
-    load_telomere_regions_from_fasta, load_telomere_regions_from_file, ChromosomeArm,
+    load_real_genomic_loci_from_file, load_telomere_regions_from_fasta,
+    load_telomere_regions_from_file, ChromosomeArm, RealGenomicLocus, RealLocusMetadata,
     TelomereAnalysis, TelomereRegion, CANONICAL_FORWARD_REPEAT, CANONICAL_REVERSE_REPEAT,
     FORWARD_VARIANT_REPEATS, REVERSE_VARIANT_REPEATS,
 };
@@ -65,9 +70,12 @@ pub use report::{
     SequenceProvenance,
 };
 pub use reprogramming::{
-    simulate_in_vivo_osk_pulse_regimen, CycleMetric, DeliveryVector, InVivoReprogrammingReport,
-    OskPulseRegimen, SafetyVerdict, MAX_SAFE_ONCOGENIC_RISK_THRESHOLD,
+    compute_identity_competence, compute_productive_dosage,
+    simulate_in_vivo_osk_pulse_regimen, simulate_in_vivo_osk_pulse_regimen_with_identity,
+    CycleMetric, DeliveryVector, InVivoReprogrammingReport, OskPulseRegimen, SafetyVerdict,
+    MAX_SAFE_ONCOGENIC_RISK_THRESHOLD,
 };
+pub use crate::safety::{GuardAction, InterventionSafetyCoupling};
 pub use risk::{
     evaluate_oncogenic_risk, OncogenicRiskAssessment, PathwayRiskBreakdown, SafetyLocks,
 };

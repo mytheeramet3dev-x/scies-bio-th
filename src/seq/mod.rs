@@ -3,6 +3,9 @@ use crate::BioError;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub mod sha256;
+pub use sha256::{compute_sha256_hex, Sha256};
+
 /// A DNA sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

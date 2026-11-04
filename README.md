@@ -131,16 +131,20 @@ for pep in peptides {
 }
 ```
 
-### 6. Real Guide Design, Simulation & Hard Constraints (v0.6.0)
+### 6. Real Guide Design, Multi-Organ Coupling & Phase A Hardening (v0.8.0)
 ```rust
 use scies_bio_th::aging::{
-    design_high_fidelity_longevity_package, load_loci_from_file,
+    design_high_fidelity_longevity_package, load_real_genomic_loci_from_file,
     validate_longevity_package, HighFidelityAgeParams, LongevityStrategy,
 };
+use scies_bio_th::anatomy::{
+    audit_clinical_reference_anchors, propagate_cross_organ_coupling,
+    AnatomicalSpatialAtlas, ClinicalBiomarkerValues, WholeBodySystemicCircuits,
+};
 
-// 1. Load real genomic target loci from T2T-CHM13
-let tert_loci = load_loci_from_file("testdata/t2t_chr5_telomere_tert.fasta")?;
-let tert_dna = &tert_loci[1].1;
+// 1. Load real genomic target loci with cryptographic SHA-256 hash
+let loci = load_real_genomic_loci_from_file("testdata/t2t_chr5_telomere_tert.fasta")?;
+let tert_locus = loci.iter().find(|l| l.id.contains("tert")).unwrap();
 
 // 2. High-Fidelity multi-factor longevity intervention design
 let subject = HighFidelityAgeParams {
@@ -153,22 +157,34 @@ let subject = HighFidelityAgeParams {
 let report = design_high_fidelity_longevity_package(
     &subject,
     LongevityStrategy::Balanced,
-    Some(&[("TERT", tert_dna)]),
+    Some(&[("TERT", &tert_locus.sequence)]),
 );
 
-// 3. Pre-flight clinical constraints validation
+// 3. Pre-flight clinical constraints & safety coupling verification
 let validation = validate_longevity_package(&report);
 assert!(validation.is_valid);
-println!("{}", report.export_detailed_summary());
+let safety = report.safety_coupling();
+println!("Stem pool: {:.1}% | Guard: {:?}", safety.stem_pool_fraction * 100.0, safety.recommended_guard_action);
+
+// 4. Synchronized cross-organ coupling propagation
+let mut atlas = AnatomicalSpatialAtlas::from_somatic_age(56.0);
+let mut circuits = WholeBodySystemicCircuits::new();
+let coupling = propagate_cross_organ_coupling(&mut atlas, &mut circuits);
+println!("Systemic SASP Burden: {:.2}", coupling.systemic_sasp_burden);
 ```
 
 ---
 
 ## 🧪 Testing & Verification
 
-Run the full test suite (75+ tests passing):
+Run the full test suite (188+ tests passing across all features):
 ```bash
-cargo test
+cargo test --all-features
+```
+
+Run longevity & aging test suite:
+```bash
+cargo test --features aging
 ```
 
 Run Criterion microbenchmarks:

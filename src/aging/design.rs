@@ -95,9 +95,25 @@ pub struct LongevityDesignReport {
     pub projected_lifespan_extension_percent: f64,
     /// Aggregate oncogenic transformation risk index (0.0 = safe, 1.0 = high risk).
     pub oncogenic_risk_index: f64,
+    /// Estimated stem cell pool fraction.
+    pub stem_pool_fraction: f64,
+    /// Somatic lineage identity retention fraction.
+    pub identity_retention: f64,
+    /// Recommended autonomous guard action.
+    pub recommended_guard_action: crate::safety::GuardAction,
 }
 
 impl LongevityDesignReport {
+    /// Extracts the standardized intervention safety coupling payload.
+    pub fn safety_coupling(&self) -> crate::safety::InterventionSafetyCoupling {
+        crate::safety::InterventionSafetyCoupling {
+            oncogenic_risk: self.oncogenic_risk_index,
+            stem_pool_fraction: self.stem_pool_fraction,
+            identity_retention: self.identity_retention,
+            recommended_guard_action: self.recommended_guard_action,
+        }
+    }
+
     /// Exports a structured textual summary of the longevity design recommendations.
     pub fn export_summary(&self) -> String {
         let mut out = String::new();
@@ -387,6 +403,24 @@ pub fn design_immortal_genome_package(
         risk_scores: baseline.risk_scores.clone(),
     };
 
+    let stem_pool_fraction = match strategy {
+        LongevityStrategy::Conservative => 0.05,
+        LongevityStrategy::Balanced => 0.08,
+        LongevityStrategy::Aggressive => 0.12,
+    };
+    let identity_retention = match strategy {
+        LongevityStrategy::Conservative => 0.98,
+        LongevityStrategy::Balanced => 0.95,
+        LongevityStrategy::Aggressive => 0.90,
+    };
+    let recommended_guard_action = if oncogenic_risk >= crate::aging::MAX_SAFE_ONCOGENIC_RISK_THRESHOLD {
+        crate::safety::GuardAction::AbortSuicideSwitch
+    } else if oncogenic_risk > 0.08 {
+        crate::safety::GuardAction::TitrateDown
+    } else {
+        crate::safety::GuardAction::Continue
+    };
+
     LongevityDesignReport {
         strategy,
         baseline_profile: baseline.clone(),
@@ -394,6 +428,9 @@ pub fn design_immortal_genome_package(
         proposed_edits,
         projected_lifespan_extension_percent: lifespan_extension,
         oncogenic_risk_index: oncogenic_risk,
+        stem_pool_fraction,
+        identity_retention,
+        recommended_guard_action,
     }
 }
 
@@ -823,12 +860,33 @@ pub fn design_high_fidelity_longevity_package(
         projected_lifespan_extension_percent: lifespan_extension,
     };
 
+    let stem_pool_fraction = match strategy {
+        LongevityStrategy::Conservative => 0.05,
+        LongevityStrategy::Balanced => 0.08,
+        LongevityStrategy::Aggressive => 0.12,
+    };
+    let identity_retention = match strategy {
+        LongevityStrategy::Conservative => 0.98,
+        LongevityStrategy::Balanced => 0.95,
+        LongevityStrategy::Aggressive => 0.90,
+    };
+    let recommended_guard_action = if oncogenic_risk.net_risk_index >= crate::aging::MAX_SAFE_ONCOGENIC_RISK_THRESHOLD {
+        crate::safety::GuardAction::AbortSuicideSwitch
+    } else if oncogenic_risk.net_risk_index > 0.08 {
+        crate::safety::GuardAction::TitrateDown
+    } else {
+        crate::safety::GuardAction::Continue
+    };
+
     HighFidelityDesignReport {
         strategy,
         metrics,
         age_breakdown: baseline_age_result,
         proposed_edits,
         oncogenic_risk,
+        stem_pool_fraction,
+        identity_retention,
+        recommended_guard_action,
         multi_generation_trajectory: Some(trajectory),
         constraint_audit,
     }

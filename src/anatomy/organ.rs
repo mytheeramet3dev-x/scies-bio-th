@@ -18,6 +18,37 @@ use crate::aging::vascular::VascularPerfusionState;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+/// Biological, biomechanical, and metabolic biomarker state for an organ.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct OrganBiomarkerSet {
+    pub viability: f64,
+    pub youngs_modulus_kpa: f64,
+    pub interstitial_po2_mmhg: f64,
+    pub sasp_secretion_rate: f64,
+    pub functional_reserve: f64,
+    pub senescent_cell_fraction: f64,
+}
+
+/// Dynamic kinetic parameters governing chronological degradation and functional decline.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct OrganAgingRateParams {
+    pub baseline_senescence_rate_per_year: f64,
+    pub ecm_crosslink_accumulation_rate_per_year: f64,
+    pub microvascular_rarefaction_rate_per_year: f64,
+    pub parenchymal_loss_rate_per_year: f64,
+}
+
+/// Pharmacodynamic and epigenetic responsiveness coefficients to rejuvenation therapies.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct OrganInterventionResponseCoefficients {
+    pub osk_epigenetic_responsiveness: f64,
+    pub senolytic_clearance_selectivity: f64,
+    pub metabolic_sirt_responsiveness: f64,
+}
+
 /// Object-Oriented interface for an anatomical human organ with *Terminologia Anatomica* (`TA2`)
 /// identity, 3D stereotaxic coordinates, neurovascular trees, stratified sub-microscopic layers,
 /// and Extracellular Matrix (`ECM`) biomechanics.
@@ -169,6 +200,166 @@ pub trait OrganArchitecture {
         v.po2_mmhg =
             (14.0 + 31.0 * (0.65 * v.capillary_density + 0.35 * v.enos_activity)).clamp(15.0, 46.0);
         self.ecm_mut().apply_chronological_aging(dt);
+    }
+
+    /// Returns the organ's current biological and biomechanical biomarker set.
+    fn biomarker_set(&self) -> OrganBiomarkerSet {
+        let viab = self.viability_hook();
+        let stiff = self.stiffness_hook_kpa();
+        let po2 = self.oxygenation_hook_po2();
+        let ecm = self.ecm();
+        let sasp = (0.45 * ecm.ages_crosslink_burden
+            + 0.35 * (1.0 - viab)
+            + 0.20 * ecm.yap_taz_mechanotransduction_stress())
+        .clamp(0.01, 1.0);
+        let reserve = match self.organ_name() {
+            "ThymicLymphoidLobule" => {
+                // Thymic involution severely depresses functional thymic reserve in aged adults
+                (viab * (1.0 - ecm.ages_crosslink_burden).powi(2)).clamp(0.05, 1.0)
+            }
+            _ => (0.50 * viab
+                + 0.30 * (po2 / 40.0).min(1.0)
+                + 0.20 * (1.0 - ecm.collagen_volume_fraction))
+            .clamp(0.05, 1.0),
+        };
+        let senescent = (0.50 * ecm.ages_crosslink_burden + 0.50 * (1.0 - viab)).clamp(0.01, 0.95);
+        OrganBiomarkerSet {
+            viability: viab,
+            youngs_modulus_kpa: stiff,
+            interstitial_po2_mmhg: po2,
+            sasp_secretion_rate: sasp,
+            functional_reserve: reserve,
+            senescent_cell_fraction: senescent,
+        }
+    }
+
+    /// Intrinsic aging rate parameters governing chronological decay.
+    fn aging_rate_params(&self) -> OrganAgingRateParams {
+        match self.organ_name() {
+            "ArterialVascularWall" => OrganAgingRateParams {
+                baseline_senescence_rate_per_year: 0.009,
+                ecm_crosslink_accumulation_rate_per_year: 0.012,
+                microvascular_rarefaction_rate_per_year: 0.010,
+                parenchymal_loss_rate_per_year: 0.004,
+            },
+            "CerebralCortexParenchyma" => OrganAgingRateParams {
+                baseline_senescence_rate_per_year: 0.006,
+                ecm_crosslink_accumulation_rate_per_year: 0.005,
+                microvascular_rarefaction_rate_per_year: 0.008,
+                parenchymal_loss_rate_per_year: 0.007,
+            },
+            "HepaticLobuleAcinus" => OrganAgingRateParams {
+                baseline_senescence_rate_per_year: 0.008,
+                ecm_crosslink_accumulation_rate_per_year: 0.009,
+                microvascular_rarefaction_rate_per_year: 0.007,
+                parenchymal_loss_rate_per_year: 0.005,
+            },
+            "HematopoieticBoneMarrowNiche" => OrganAgingRateParams {
+                baseline_senescence_rate_per_year: 0.011,
+                ecm_crosslink_accumulation_rate_per_year: 0.008,
+                microvascular_rarefaction_rate_per_year: 0.009,
+                parenchymal_loss_rate_per_year: 0.008,
+            },
+            "ThymicLymphoidLobule" => OrganAgingRateParams {
+                baseline_senescence_rate_per_year: 0.025,
+                ecm_crosslink_accumulation_rate_per_year: 0.015,
+                microvascular_rarefaction_rate_per_year: 0.018,
+                parenchymal_loss_rate_per_year: 0.022,
+            },
+            "DermalCutaneousTissue" => OrganAgingRateParams {
+                baseline_senescence_rate_per_year: 0.010,
+                ecm_crosslink_accumulation_rate_per_year: 0.014,
+                microvascular_rarefaction_rate_per_year: 0.008,
+                parenchymal_loss_rate_per_year: 0.006,
+            },
+            _ => OrganAgingRateParams {
+                baseline_senescence_rate_per_year: 0.008,
+                ecm_crosslink_accumulation_rate_per_year: 0.008,
+                microvascular_rarefaction_rate_per_year: 0.007,
+                parenchymal_loss_rate_per_year: 0.006,
+            },
+        }
+    }
+
+    /// Responsiveness coefficients to OSK reprogramming, senolytic clearance, and metabolic enhancement.
+    fn intervention_response_coeffs(&self) -> OrganInterventionResponseCoefficients {
+        match self.organ_name() {
+            "ArterialVascularWall" => OrganInterventionResponseCoefficients {
+                osk_epigenetic_responsiveness: 0.75,
+                senolytic_clearance_selectivity: 0.90,
+                metabolic_sirt_responsiveness: 0.88,
+            },
+            "CerebralCortexParenchyma" => OrganInterventionResponseCoefficients {
+                osk_epigenetic_responsiveness: 0.70,
+                senolytic_clearance_selectivity: 0.75,
+                metabolic_sirt_responsiveness: 0.92,
+            },
+            "HepaticLobuleAcinus" => OrganInterventionResponseCoefficients {
+                osk_epigenetic_responsiveness: 0.95,
+                senolytic_clearance_selectivity: 0.92,
+                metabolic_sirt_responsiveness: 0.95,
+            },
+            "HematopoieticBoneMarrowNiche" => OrganInterventionResponseCoefficients {
+                osk_epigenetic_responsiveness: 0.90,
+                senolytic_clearance_selectivity: 0.85,
+                metabolic_sirt_responsiveness: 0.85,
+            },
+            "ThymicLymphoidLobule" => OrganInterventionResponseCoefficients {
+                osk_epigenetic_responsiveness: 0.92,
+                senolytic_clearance_selectivity: 0.88,
+                metabolic_sirt_responsiveness: 0.90,
+            },
+            "DermalCutaneousTissue" => OrganInterventionResponseCoefficients {
+                osk_epigenetic_responsiveness: 0.88,
+                senolytic_clearance_selectivity: 0.95,
+                metabolic_sirt_responsiveness: 0.82,
+            },
+            _ => OrganInterventionResponseCoefficients {
+                osk_epigenetic_responsiveness: 0.80,
+                senolytic_clearance_selectivity: 0.80,
+                metabolic_sirt_responsiveness: 0.80,
+            },
+        }
+    }
+
+    /// Organ parenchymal cellular viability hook ($0.0\text{--}1.0$).
+    fn viability_hook(&self) -> f64 {
+        let ecm = self.ecm();
+        let v = self.vascular();
+        (0.40 * (v.capillary_density / 0.90).min(1.0)
+            + 0.35 * (1.0 - ecm.ages_crosslink_burden)
+            + 0.25 * (v.po2_mmhg / 38.0).min(1.0))
+        .clamp(0.10, 1.0)
+    }
+
+    /// Elastic stiffness Young's modulus hook ($E$, $\text{kPa}$).
+    fn stiffness_hook_kpa(&self) -> f64 {
+        self.ecm().youngs_modulus_kpa
+    }
+
+    /// Interstitial tissue oxygen tension hook ($p\text{O}_2$, $\text{mmHg}$).
+    fn oxygenation_hook_po2(&self) -> f64 {
+        self.mean_parenchymal_po2_mmhg()
+    }
+
+    /// Applies targeted intervention responses (OSK dosage, senolytics, metabolic activators)
+    /// scaled by this organ's specific response coefficients.
+    fn apply_targeted_intervention_response(
+        &mut self,
+        osk_dose: f64,
+        senolytic_dose: f64,
+        metabolic_dose: f64,
+    ) {
+        let coeffs = self.intervention_response_coeffs();
+        let eff_osk = osk_dose * coeffs.osk_epigenetic_responsiveness;
+        let eff_seno = senolytic_dose * coeffs.senolytic_clearance_selectivity;
+        let eff_meta = metabolic_dose * coeffs.metabolic_sirt_responsiveness;
+
+        self.rejuvenate_architecture(
+            (0.5 * eff_osk + 0.5 * eff_meta).clamp(0.0, 1.0),
+            (0.7 * eff_seno + 0.3 * eff_meta).clamp(0.0, 1.0),
+            (0.6 * eff_seno + 0.4 * eff_osk).clamp(0.0, 1.0),
+        );
     }
 }
 
@@ -1077,6 +1268,45 @@ impl OrganArchitecture for AnatomicalOrgan {
     fn vascular_mut(&mut self) -> &mut VascularPerfusionState {
         delegate_anatomical_organ!(self, vascular_mut)
     }
+
+    fn biomarker_set(&self) -> OrganBiomarkerSet {
+        delegate_anatomical_organ!(self, biomarker_set)
+    }
+
+    fn aging_rate_params(&self) -> OrganAgingRateParams {
+        delegate_anatomical_organ!(self, aging_rate_params)
+    }
+
+    fn intervention_response_coeffs(&self) -> OrganInterventionResponseCoefficients {
+        delegate_anatomical_organ!(self, intervention_response_coeffs)
+    }
+
+    fn viability_hook(&self) -> f64 {
+        delegate_anatomical_organ!(self, viability_hook)
+    }
+
+    fn stiffness_hook_kpa(&self) -> f64 {
+        delegate_anatomical_organ!(self, stiffness_hook_kpa)
+    }
+
+    fn oxygenation_hook_po2(&self) -> f64 {
+        delegate_anatomical_organ!(self, oxygenation_hook_po2)
+    }
+
+    fn apply_targeted_intervention_response(
+        &mut self,
+        osk_dose: f64,
+        senolytic_dose: f64,
+        metabolic_dose: f64,
+    ) {
+        delegate_anatomical_organ!(
+            self,
+            apply_targeted_intervention_response,
+            osk_dose,
+            senolytic_dose,
+            metabolic_dose
+        )
+    }
 }
 
 /// Complete 3D Whole-Body Spatial Atlas containing all 20 *Gray's Anatomy* / `TA2` organs and their
@@ -1491,5 +1721,40 @@ mod tests {
         let skin_to_thymus = skin.directional_relations_to(thymus);
         assert!(skin_to_thymus.contains(&DirectionalAxisRelation::SuperficialTo));
         assert!(skin_to_thymus.contains(&DirectionalAxisRelation::LateralTo));
+    }
+
+    #[test]
+    fn test_six_humanz_organs_completeness_and_intervention_response() {
+        let mut atlas = AnatomicalSpatialAtlas::from_somatic_age(65.0);
+        // Indices: 0: Artery, 1: Cortex, 2: Liver, 3: Marrow, 4: Thymus, 5: Skin
+        for i in 0..6 {
+            let organ = &atlas.organs[i];
+            let bm = organ.biomarker_set();
+            assert!(bm.viability > 0.0 && bm.viability <= 1.0);
+            assert!(bm.youngs_modulus_kpa > 0.5);
+            assert!(bm.interstitial_po2_mmhg > 10.0 && bm.interstitial_po2_mmhg < 60.0);
+            assert!(bm.sasp_secretion_rate >= 0.01 && bm.sasp_secretion_rate <= 1.0);
+            assert!(bm.functional_reserve >= 0.05 && bm.functional_reserve <= 1.0);
+            assert!(bm.senescent_cell_fraction >= 0.01 && bm.senescent_cell_fraction <= 1.0);
+
+            let aging_params = organ.aging_rate_params();
+            assert!(aging_params.baseline_senescence_rate_per_year > 0.0);
+            assert!(aging_params.ecm_crosslink_accumulation_rate_per_year > 0.0);
+            assert!(aging_params.microvascular_rarefaction_rate_per_year > 0.0);
+            assert!(aging_params.parenchymal_loss_rate_per_year > 0.0);
+
+            let resp = organ.intervention_response_coeffs();
+            assert!(resp.osk_epigenetic_responsiveness > 0.5);
+            assert!(resp.senolytic_clearance_selectivity > 0.5);
+            assert!(resp.metabolic_sirt_responsiveness > 0.5);
+        }
+
+        // Test applying targeted intervention response to liver
+        let liver = &mut atlas.organs[2];
+        let stiff_before = liver.stiffness_hook_kpa();
+        let viab_before = liver.viability_hook();
+        liver.apply_targeted_intervention_response(0.9, 0.9, 0.9);
+        assert!(liver.viability_hook() > viab_before);
+        assert!(liver.stiffness_hook_kpa() < stiff_before);
     }
 }

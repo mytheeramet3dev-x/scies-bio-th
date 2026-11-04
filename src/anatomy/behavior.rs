@@ -66,20 +66,20 @@ impl MyocardialVentricularOrgan {
 
         // Diastolic compliance diminishes inversely with myocardial Young's modulus & AGE cross-links
         // Calibrated to youthful myocardium E_0 = 18.0 kPa -> compliance ~ 1.0
-        let compliance = (18.0 / (e_kpa * (1.0 + 1.2 * ages))).clamp(0.20, 1.30);
+        let compliance = (18.0 / (e_kpa * (1.0 + 0.85 * ages))).clamp(0.42, 1.25);
 
-        // End-Diastolic Volume governed by filling pressure & compliance (normal resting EDV ~120-130 mL)
-        let edv = (65.0 + 7.5 * venous_filling_pressure_mmhg.clamp(2.0, 25.0) * compliance)
-            .clamp(70.0, 160.0);
+        // End-Diastolic Volume governed by filling pressure & compliance (normal resting EDV ~120 mL; HFpEF ~98-105 mL)
+        let edv = (76.0 + 7.2 * venous_filling_pressure_mmhg.clamp(2.0, 25.0) * compliance)
+            .clamp(88.0, 160.0);
 
-        // Frank-Starling inotropic contractility factor (modulated by local capillary pO2 and eNOS)
-        let o2_factor = (self.vascular.po2_mmhg / 42.0).clamp(0.40, 1.25);
-        let contractility = (0.64 * o2_factor * (1.0 - 0.15 * self.ecm.yap_taz_mechanotransduction_stress()))
-            .clamp(0.35, 0.78);
+        // Frank-Starling inotropic contractility factor (preserved ~54-58% EF at rest in HFpEF, impaired contractile reserve)
+        let o2_factor = (self.vascular.po2_mmhg / 40.0).clamp(0.72, 1.18);
+        let contractility = (0.64 * o2_factor * (1.0 - 0.10 * self.ecm.yap_taz_mechanotransduction_stress()))
+            .clamp(0.52, 0.74);
 
         // Afterload impedance reduces stroke volume ejection
-        let afterload_penalty = (1.0 + 0.15 * (aortic_afterload_impedance - 1.0).max(0.0)).clamp(1.0, 2.0);
-        let sv = (edv * contractility / afterload_penalty).clamp(25.0, 110.0);
+        let afterload_penalty = (1.0 + 0.12 * (aortic_afterload_impedance - 1.0).max(0.0)).clamp(1.0, 1.6);
+        let sv = (edv * contractility / afterload_penalty).clamp(42.0, 115.0);
         let esv = (edv - sv).max(15.0);
         let ef = (sv / edv) * 100.0;
         let co = (sv * hr) / 1000.0;
@@ -234,16 +234,18 @@ impl ArterialVascularOrgan {
         let ages = self.ecm.ages_crosslink_burden.clamp(0.0, 1.0);
 
         // Windkessel Compliance: Cart = V / (E_aorta * (1 + AGEs))
-        let compliance = (52.0 / (e_kpa * (1.0 + 1.1 * ages))).clamp(0.40, 2.20);
+        // Youthful E_0 = 28 kPa -> Cart ~ 1.85 mL/mmHg; Aged E ~ 75 kPa -> Cart ~ 0.62 mL/mmHg
+        let compliance = (54.0 / (e_kpa * (1.0 + 0.85 * ages))).clamp(0.55, 2.10);
 
-        // Pulse Pressure = SV / Compliance
-        let pulse_pressure = (sv / compliance).clamp(32.0, 110.0);
+        // Pulse Pressure = SV / Compliance (Youthful ~ 40 mmHg; Aged ISH ~ 75-85 mmHg)
+        let pulse_pressure = (sv / compliance).clamp(34.0, 96.0);
 
-        // Mean Arterial Pressure = CO * SVR + Windkessel pulse wave augmentation in stiffened aorta
-        let stiffness_augmentation = 0.22 * (e_kpa - 28.0).max(0.0);
-        let map = (co * svr * 0.90 + stiffness_augmentation).clamp(58.0, 165.0);
-        let diastolic = (map - pulse_pressure / 3.0).clamp(45.0, 115.0);
-        let systolic = (diastolic + pulse_pressure).clamp(80.0, 220.0);
+        // Mean Arterial Pressure = CO * SVR * 0.90 (Youthful ~ 85-92 mmHg; Aged ISH ~ 100-110 mmHg)
+        let map = (co * svr * 0.90).clamp(65.0, 155.0);
+        // In aortic stiffening, early systolic wave reflection augments systolic pressure while lowering diastolic support
+        let wave_reflection_shift = 0.08 * (pulse_pressure - 40.0).max(0.0);
+        let diastolic = (map - (pulse_pressure / 3.0) - wave_reflection_shift).clamp(58.0, 105.0);
+        let systolic = (diastolic + pulse_pressure).clamp(95.0, 205.0);
 
         // Poiseuille wall shear stress tau = 4*mu*Q / (pi*r^3)
         let shear = (18.0 * (co / 5.0) * (self.vascular.capillary_density / 0.85)).clamp(5.0, 35.0);
