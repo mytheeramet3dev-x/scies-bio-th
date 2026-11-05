@@ -2,8 +2,10 @@
 //!
 //! A mathematically rigorous Tri-Layer engine for reconstructing coding loci, resurrecting
 //! inactivated pseudogenes, and planning de-extinction chassis edits for extinct taxa:
-//! - **Layer 1 ([`asr`])**: Continuous-Time Markov Chain (HKY85, GTR, K80, JC69) with discrete $\Gamma_4$
-//!   rate heterogeneity and dynamic node log-scaling Ancestral Sequence Reconstruction via Felsenstein's algorithm.
+//! - **Layer 1 ([`asr`])**: Continuous-Time Markov Chain Ancestral Sequence Reconstruction via
+//!   Felsenstein's post-order pruning algorithm with dynamic log-scaling. Default model is
+//!   **HKY85 + discrete $\Gamma_4$** rate heterogeneity ([`SubstitutionModel::default_vertebrate_coding()`]),
+//!   with GTR, K80, and JC69 available.
 //! - **Layer 2 ([`biomolecule`])**: Bayesian paleoproteomic codon back-translation (`COL1A1`, `ENAM`)
 //!   and Briggs post-mortem deamination-aware ancient DNA (`aDNA`) integration.
 //! - **Layer 2.5 ([`resurrection`])**: Outgroup-bracketed pseudogene resurrection (repairing

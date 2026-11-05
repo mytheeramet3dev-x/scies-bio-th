@@ -62,9 +62,9 @@ The `paleo` module implements a mathematically rigorous three-layer pipeline:
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                        Layer 1: Phylogenetic Ancestral Core                            │
-│  Extant Relatives Alignment + Rooted Tree (PhyloNode) + Substitution Model (JC69 / K80)│
+│  Extant Relatives Alignment + Tree (PhyloNode) + Model (HKY85+Γ₄ / GTR / K80 / JC69)   │
 │                                           │                                            │
-│                                Felsenstein Pruning                                     │
+│                        Log-Scaled Felsenstein Pruning                                  │
 │                                           ▼                                            │
 │                 Marginal Ancestral Posteriors + Extinct Branch Drift                   │
 └───────────────────────────────────────────┬────────────────────────────────────────────┘
@@ -141,6 +141,13 @@ When exporting sequences for downstream primer or guide design, `BasePosterior::
 
 ### 3.2 Continuous-Time Markov Chain (CTMC) & Felsenstein Pruning
 Evolutionary substitution along branch length $t$ (in millions of years, Ma) is modeled by a $4 \times 4$ rate transition probability matrix $P(t) = \exp(Qt)$.
+
+#### Substitution Models (HKY85, GTR, K80, JC69)
+The default vertebrate coding model is **HKY85 + discrete $\Gamma_4$** rate heterogeneity (`SubstitutionModel::default_vertebrate_coding()`):
+- **HKY85 (Hasegawa, Kishino, Yano 1985)**: Differentiates transitions from transversions with $\kappa$ while accounting for unequal base frequencies $\pi = [\pi_A, \pi_C, \pi_G, \pi_T]$.
+- **Discrete $\Gamma_4$ Rate Heterogeneity**: Computes 4 category substitution rates using Wilson-Hilferty transformation under shape parameter $\alpha$ (e.g. $\alpha = 0.60$).
+- **GTR (General Time Reversible)**: Full 6-parameter symmetric exchangeabilities evaluated via matrix exponential scaling and squaring.
+- **Log-Scaled Felsenstein Pruning**: At each internal node, likelihood vectors are dynamically scaled by $s = \max_b L(b)$ to guarantee absolute mathematical immunity against numerical underflow on deep branches (up to 250+ Ma).
 
 #### Kimura 2-Parameter (K80) Formulation
 Differentiating transitions ($A \leftrightarrow G, C \leftrightarrow T$ at rate $\alpha$) from transversions ($A,G \leftrightarrow C,T$ at rate $\beta$) with transition/transversion ratio $\kappa = \alpha / \beta$ and overall substitution rate $\mu$:
@@ -233,7 +240,7 @@ To eliminate non-commutative order artifacts and avoid false overconfidence from
 | :--- | :--- | :--- |
 | [`BasePosterior`](file:///C:/Projects/github/scies-bio-th/src/paleo/types.rs#L96-L221) | 4-element probability vector `[P(A), P(C), P(G), P(T)]` with entropy calculation and IUPAC encoding | `scies_bio_th::paleo::types` |
 | [`ReconstructedLocus`](file:///C:/Projects/github/scies-bio-th/src/paleo/types.rs#L285-L382) | Full locus structure containing site posteriors, consensus DNA/Protein, and uncertainty intervals | `scies_bio_th::paleo::types` |
-| [`SubstitutionModel`](file:///C:/Projects/github/scies-bio-th/src/paleo/asr.rs#L17-L84) | CTMC transition models (`JukesCantor` and `Kimura2Param`) | `scies_bio_th::paleo::asr` |
+| [`SubstitutionModel`](file:///C:/Projects/github/scies-bio-th/src/paleo/asr.rs#L17-L84) | CTMC transition models (`Hky85` with discrete $\Gamma_4$, `Gtr`, `Kimura2Param`, `JukesCantor`) | `scies_bio_th::paleo::asr` |
 | [`FelsensteinAsr`](file:///C:/Projects/github/scies-bio-th/src/paleo/asr.rs#L94-L198) | Upward post-order tree pruning and forward terminal branch drift propagation | `scies_bio_th::paleo::asr` |
 | [`PeptideFragment`](file:///C:/Projects/github/scies-bio-th/src/paleo/biomolecule.rs#L22-L40) | Mass-spec peptide fragment with PSM confidence and hydroxyproline normalization | `scies_bio_th::paleo::biomolecule` |
 | [`PaleoproteomeTranslator`](file:///C:/Projects/github/scies-bio-th/src/paleo/biomolecule.rs#L43-L177) | Bayesian reverse-translation from amino acids to codons using codon-usage bias priors | `scies_bio_th::paleo::biomolecule` |

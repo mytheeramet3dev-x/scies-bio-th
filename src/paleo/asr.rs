@@ -1,9 +1,9 @@
 //! Layer 1: Continuous-Time Markov Chain (CTMC) Ancestral Sequence Reconstruction (ASR).
 //!
 //! Implements Felsenstein's post-order pruning algorithm on rooted phylogenetic trees (`PhyloNode`)
-//! under HKY85, GTR, Kimura 2-Parameter (K80), and Jukes-Cantor (JC69) nucleotide substitution
-//! models, incorporating discrete $\Gamma_4$ rate heterogeneity across sites and dynamic
-//! node log-space scaling to eliminate numerical underflow on deep or dinosaur-scale extinct branches.
+//! using **HKY85 + discrete $\Gamma_4$** as the default vertebrate coding model (along with GTR,
+//! K80, and JC69), incorporating dynamic node log-space scaling to eliminate numerical
+//! underflow on deep trees and dinosaur-scale extinct branches.
 
 use crate::paleo::types::{
     base_to_index, BasePosterior, LocusProvenance, PaleoError, ReconstructedLocus, SiteSource,
