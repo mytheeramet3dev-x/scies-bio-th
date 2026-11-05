@@ -60,7 +60,16 @@ pub struct ChassisGenomicEdit {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ReconstructionMetrics {
     pub total_bases_reconstructed: usize,
+    /// Blended expected base accuracy across all sites regardless of source.
     pub overall_base_accuracy_expected: f64,
+    /// Expected accuracy exclusively across pure phylogenetic ASR sites.
+    pub asr_base_accuracy_expected: f64,
+    /// Expected accuracy across all biomolecule-anchored sites (aDNA + paleoproteomics).
+    pub anchored_base_accuracy_expected: f64,
+    /// Expected accuracy for ancient DNA-anchored sites.
+    pub adna_base_accuracy_expected: f64,
+    /// Expected accuracy for paleoproteomic-anchored sites.
+    pub proteomics_base_accuracy_expected: f64,
     pub fraction_anchored_by_adna: f64,
     pub fraction_anchored_by_proteomics: f64,
     pub fraction_inferred_by_asr: f64,
@@ -169,6 +178,9 @@ impl PaleoReconstructionEngine {
 
         let mut total_bases = 0usize;
         let mut sum_conf = 0.0;
+        let mut sum_conf_asr = 0.0;
+        let mut sum_conf_adna = 0.0;
+        let mut sum_conf_prot = 0.0;
         let mut sum_entropy = 0.0;
         let mut count_adna = 0usize;
         let mut count_prot = 0usize;
@@ -180,12 +192,22 @@ impl PaleoReconstructionEngine {
             let len = locus.sites.len();
             total_bases += len;
             for (i, site) in locus.sites.iter().enumerate() {
-                sum_conf += site.max_prob();
+                let conf = site.max_prob();
+                sum_conf += conf;
                 sum_entropy += site.entropy_bits();
                 match locus.provenance.site_sources[i] {
-                    SiteSource::AncientDna => count_adna += 1,
-                    SiteSource::Paleoproteomics => count_prot += 1,
-                    SiteSource::AncestralReconstruction => count_asr += 1,
+                    SiteSource::AncientDna => {
+                        count_adna += 1;
+                        sum_conf_adna += conf;
+                    }
+                    SiteSource::Paleoproteomics => {
+                        count_prot += 1;
+                        sum_conf_prot += conf;
+                    }
+                    SiteSource::AncestralReconstruction => {
+                        count_asr += 1;
+                        sum_conf_asr += conf;
+                    }
                     SiteSource::PseudogeneRepair => count_pseudo += 1,
                 }
             }
@@ -281,9 +303,21 @@ impl PaleoReconstructionEngine {
             .count();
 
         let denom = (total_bases.max(1)) as f64;
+        let count_anchored = count_adna + count_prot;
+        let sum_conf_anchored = sum_conf_adna + sum_conf_prot;
+
+        let asr_acc = if count_asr > 0 { sum_conf_asr / count_asr as f64 } else { 0.0 };
+        let anchored_acc = if count_anchored > 0 { sum_conf_anchored / count_anchored as f64 } else { 0.0 };
+        let adna_acc = if count_adna > 0 { sum_conf_adna / count_adna as f64 } else { 0.0 };
+        let prot_acc = if count_prot > 0 { sum_conf_prot / count_prot as f64 } else { 0.0 };
+
         let summary_metrics = ReconstructionMetrics {
             total_bases_reconstructed: total_bases,
             overall_base_accuracy_expected: sum_conf / denom,
+            asr_base_accuracy_expected: asr_acc,
+            anchored_base_accuracy_expected: anchored_acc,
+            adna_base_accuracy_expected: adna_acc,
+            proteomics_base_accuracy_expected: prot_acc,
             fraction_anchored_by_adna: count_adna as f64 / denom,
             fraction_anchored_by_proteomics: count_prot as f64 / denom,
             fraction_inferred_by_asr: count_asr as f64 / denom,

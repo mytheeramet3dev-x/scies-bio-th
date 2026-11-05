@@ -2,16 +2,51 @@
 //!
 //! A mathematically rigorous Tri-Layer engine for reconstructing coding loci, resurrecting
 //! inactivated pseudogenes, and planning de-extinction chassis edits for extinct taxa:
-//! - **Layer 1 ([`asr`])**: Continuous-Time Markov Chain (JC69 / K80) Ancestral Sequence
-//!   Reconstruction via Felsenstein's post-order pruning algorithm.
+//! - **Layer 1 ([`asr`])**: Continuous-Time Markov Chain (HKY85, GTR, K80, JC69) with discrete $\Gamma_4$
+//!   rate heterogeneity and dynamic node log-scaling Ancestral Sequence Reconstruction via Felsenstein's algorithm.
 //! - **Layer 2 ([`biomolecule`])**: Bayesian paleoproteomic codon back-translation (`COL1A1`, `ENAM`)
 //!   and Briggs post-mortem deamination-aware ancient DNA (`aDNA`) integration.
 //! - **Layer 2.5 ([`resurrection`])**: Outgroup-bracketed pseudogene resurrection (repairing
 //!   premature stop codons and frameshift defects in extant descendants).
 //! - **Layer 3 ([`phenotype`])**: Commutative, group-discounted Bayesian phenotypic & isotope
-//!   selection profiling.
+//!   selection profiling ($\omega$ selection intensity & gene presence/absence priors).
 //! - **Synthesis ([`engine`])**: [`PaleoReconstructionEngine`] producing [`PaleoGenomeDraft`]
-//!   and prioritized [`ChassisGenomicEdit`] plans.
+//!   with separated ASR vs anchored accuracy tracking and ranked [`ChassisGenomicEdit`] plans.
+//!
+//! ### Quick Example
+//! ```rust
+//! use scies_bio_th::paleo::*;
+//! use scies_bio_th::phylo::PhyloNode;
+//! use scies_bio_th::seq::Dna;
+//!
+//! // 1. Set up phylogenetic tree
+//! let birds = PhyloNode::internal(
+//!     vec![PhyloNode::leaf("Gallus_gallus", 68.0), PhyloNode::leaf("Falco_peregrinus", 68.0)],
+//!     160.0,
+//! );
+//! let alligator = PhyloNode::leaf("Alligator_mississippiensis", 228.0);
+//! let tree = PhyloNode::internal(vec![birds, alligator], 0.0);
+//!
+//! // 2. Extant coding sequences
+//! let seqs = vec![
+//!     ExtantSequence::new("Gallus_gallus", Dna::new(b"ATGGGTCCCGCT").unwrap()),
+//!     ExtantSequence::new("Falco_peregrinus", Dna::new(b"ATGGGTCCCGCT").unwrap()),
+//!     ExtantSequence::new("Alligator_mississippiensis", Dna::new(b"ATGGGTCCCGCA").unwrap()),
+//! ];
+//!
+//! // 3. Reconstruct extinct theropod locus with HKY85 + Gamma
+//! let model = SubstitutionModel::default_vertebrate_coding();
+//! let locus = FelsensteinAsr::reconstruct_locus(
+//!     &tree,
+//!     &seqs,
+//!     &model,
+//!     "Tyrannosaurus_rex",
+//!     "COL1A1",
+//!     66.0,
+//! ).unwrap();
+//!
+//! assert_eq!(locus.to_consensus_dna().sequence, b"ATGGGTCCCGCT");
+//! ```
 
 pub mod asr;
 pub mod biomolecule;
@@ -341,5 +376,198 @@ mod tests {
             draft.chassis_edit_plan[2].effect,
             EditEffectType::Synonymous { .. }
         ));
+
+        // Verify accuracy breakdown by evidence source
+        assert!(draft.summary_metrics.proteomics_base_accuracy_expected > 0.90);
+        assert!(draft.summary_metrics.fraction_anchored_by_proteomics > 0.40);
+    }
+
+    #[test]
+    fn test_hky85_gtr_gamma_and_deep_tree_stability() {
+        // Deep tree: ((((Chicken:68, Falcon:68):50, Emu:118):40, Alligator:160):80, Turtle:240)
+        let c_f = PhyloNode::internal(
+            vec![
+                PhyloNode::leaf("Chicken", 68.0),
+                PhyloNode::leaf("Falcon", 68.0),
+            ],
+            50.0,
+        );
+        let emu = PhyloNode::leaf("Emu", 118.0);
+        let birds = PhyloNode::internal(vec![c_f, emu], 40.0);
+        let alligator = PhyloNode::leaf("Alligator", 160.0);
+        let archosaur = PhyloNode::internal(vec![birds, alligator], 80.0);
+        let turtle = PhyloNode::leaf("Turtle", 240.0);
+        let deep_tree = PhyloNode::internal(vec![archosaur, turtle], 0.0);
+
+        // 120 bp synthetic locus
+        let raw_seq = b"ATGAAACCCGGGTTTAAACCCGGGTTTAAACCCGGGTTTAAACCCGGGTTTAAACCCGGGTTTAAACCCGGGTTTAAACCCGGGTTTAAACCCGGGTTTAAACCCGGGTTTAAACCCGGGTTT";
+        let seqs = vec![
+            ExtantSequence::new("Chicken", Dna::new(raw_seq).unwrap()),
+            ExtantSequence::new("Falcon", Dna::new(raw_seq).unwrap()),
+            ExtantSequence::new("Emu", Dna::new(raw_seq).unwrap()),
+            ExtantSequence::new("Alligator", Dna::new(raw_seq).unwrap()),
+            ExtantSequence::new("Turtle", Dna::new(raw_seq).unwrap()),
+        ];
+
+        // 1. Test HKY85 with 4-category discrete gamma
+        let hky_gamma = SubstitutionModel::Hky85 {
+            pi: [0.28, 0.22, 0.22, 0.28],
+            kappa: 3.5,
+            mu: 0.0025,
+            gamma_shape: Some(0.5),
+        };
+
+        let locus_hky = FelsensteinAsr::reconstruct_locus(
+            &deep_tree,
+            &seqs,
+            &hky_gamma,
+            "Sauropod_morph",
+            "ACTB",
+            150.0, // 150 Ma deep branch
+        )
+        .unwrap();
+
+        assert_eq!(locus_hky.sites.len(), raw_seq.len());
+        assert!(locus_hky.mean_posterior_confidence > 0.50);
+        for site in &locus_hky.sites {
+            let sum: f64 = site.probs.iter().sum();
+            assert!((sum - 1.0).abs() < 1e-6, "Probabilities must sum to 1.0 without underflow");
+            assert!(site.max_prob() >= 0.25);
+        }
+
+        // 2. Test GTR with 4-category discrete gamma
+        let gtr_gamma = SubstitutionModel::Gtr {
+            pi: [0.30, 0.20, 0.20, 0.30],
+            rates: [1.2, 4.0, 0.8, 0.7, 3.8, 1.1],
+            mu: 0.0020,
+            gamma_shape: Some(0.7),
+        };
+
+        let locus_gtr = FelsensteinAsr::reconstruct_locus(
+            &deep_tree,
+            &seqs,
+            &gtr_gamma,
+            "Sauropod_morph",
+            "ACTB",
+            200.0, // 200 Ma extreme branch
+        )
+        .unwrap();
+
+        assert_eq!(locus_gtr.sites.len(), raw_seq.len());
+        assert!(locus_gtr.mean_posterior_confidence > 0.40);
+        for site in &locus_gtr.sites {
+            let sum: f64 = site.probs.iter().sum();
+            assert!((sum - 1.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_mammoth_vs_theropod_uncertainty_breakdown() {
+        // 1. Mammoth-like Case: 4 Ma branch, high aDNA & proteomic coverage
+        let tree_mammoth = PhyloNode::internal(
+            vec![
+                PhyloNode::leaf("Elephas_maximus", 5.0),
+                PhyloNode::leaf("Loxodonta_africana", 6.0),
+            ],
+            0.0,
+        );
+        let seq_mammoth = vec![
+            ExtantSequence::new("Elephas_maximus", Dna::new(b"ATGGCCGTAGTGCTT").unwrap()),
+            ExtantSequence::new("Loxodonta_africana", Dna::new(b"ATGGCCGTAGTGCTT").unwrap()),
+        ];
+        let model = SubstitutionModel::default_vertebrate_coding();
+        let mut locus_mammoth = FelsensteinAsr::reconstruct_locus(
+            &tree_mammoth,
+            &seq_mammoth,
+            &model,
+            "Mammuthus_primigenius",
+            "TRPM8",
+            4.0, // only 4 Ma terminal branch
+        )
+        .unwrap();
+
+        // Anchor with paleoproteomics (positions 0..9)
+        let peptide = PeptideFragment::new(0, b"MAV", 0.99);
+        PaleoproteomeTranslator::anchor_with_peptides(&mut locus_mammoth, &[peptide], None).unwrap();
+
+        assert!(locus_mammoth.anchored_site_count >= 9);
+        assert!(locus_mammoth.asr_site_count <= 6);
+        let bio_conf = locus_mammoth.biomolecule_mean_confidence.unwrap();
+        assert!(bio_conf > 0.95, "Biomolecule-anchored confidence must be very high");
+
+        // 2. Theropod-like Case: 66 Ma branch, extant outgroups, only short peptide (3 bp of 30 bp)
+        let tree_theropod = sample_archosaur_tree();
+        let raw_30bp = b"ATGGGTCCCGCTGCCGTTCTTGCCGTAGTG";
+        let seq_theropod = vec![
+            ExtantSequence::new("Gallus_gallus", Dna::new(raw_30bp).unwrap()),
+            ExtantSequence::new("Falco_peregrinus", Dna::new(raw_30bp).unwrap()),
+            ExtantSequence::new("Alligator_mississippiensis", Dna::new(raw_30bp).unwrap()),
+        ];
+        let mut locus_theropod = FelsensteinAsr::reconstruct_locus(
+            &tree_theropod,
+            &seq_theropod,
+            &model,
+            "Tyrannosaurus_rex",
+            "COL1A1",
+            66.0, // 66 Ma terminal branch
+        )
+        .unwrap();
+
+        // Short peptide anchoring only the first 3 codons (9 bp)
+        let pep_t_rex = PeptideFragment::new(0, b"MGP", 0.98);
+        PaleoproteomeTranslator::anchor_with_peptides(&mut locus_theropod, &[pep_t_rex], None).unwrap();
+
+        // Check clear separation of metrics
+        let asr_conf = locus_theropod.asr_mean_confidence.unwrap();
+        let anchored_conf = locus_theropod.biomolecule_mean_confidence.unwrap();
+
+        assert!(anchored_conf > asr_conf, "Anchored confidence must strictly exceed pure ASR confidence");
+        assert!(anchored_conf > 0.90);
+        assert!(locus_theropod.high_uncertainty_regions.len() <= locus_theropod.sites.len());
+    }
+
+    #[test]
+    fn test_entropy_monotonically_increases_with_extinct_branch_ma() {
+        let tree = sample_archosaur_tree();
+        // 150 bp locus
+        let unit = b"ATGGGTCCCGCTGCC";
+        let mut rep = Vec::new();
+        for _ in 0..10 {
+            rep.extend_from_slice(unit);
+        }
+        let seqs = vec![
+            ExtantSequence::new("Gallus_gallus", Dna::new(&rep).unwrap()),
+            ExtantSequence::new("Falco_peregrinus", Dna::new(&rep).unwrap()),
+            ExtantSequence::new("Alligator_mississippiensis", Dna::new(&rep).unwrap()),
+        ];
+        let model = SubstitutionModel::default_vertebrate_coding();
+
+        let branch_times = [0.0, 15.0, 45.0, 80.0, 150.0, 250.0];
+        let mut entropies = Vec::new();
+
+        for &t in &branch_times {
+            let locus = FelsensteinAsr::reconstruct_locus(
+                &tree,
+                &seqs,
+                &model,
+                "Extinct_taxon",
+                "TEST_LOCUS",
+                t,
+            )
+            .unwrap();
+            entropies.push(locus.mean_entropy_bits);
+        }
+
+        // Verify strictly monotonic increase of Shannon entropy along the extinct branch
+        for i in 0..(entropies.len() - 1) {
+            assert!(
+                entropies[i] < entropies[i + 1],
+                "Entropy must increase monotonically with branch time: H({}) = {} vs H({}) = {}",
+                branch_times[i],
+                entropies[i],
+                branch_times[i + 1],
+                entropies[i + 1]
+            );
+        }
     }
 }

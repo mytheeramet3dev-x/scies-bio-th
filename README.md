@@ -118,6 +118,33 @@ let tree = upgma(&dm)?;
 println!("Newick: {}", tree.to_newick());
 ```
 
+### 5. Paleo-Genomic & Paleoproteomic Reconstruction (`paleo`)
+```rust
+use scies_bio_th::paleo::*;
+use scies_bio_th::phylo::PhyloNode;
+use scies_bio_th::seq::Dna;
+
+// Archosaurian bracket for Tyrannosaurus rex COL1A1
+let birds = PhyloNode::internal(vec![PhyloNode::leaf("Chicken", 68.0)], 160.0);
+let tree = PhyloNode::internal(vec![birds, PhyloNode::leaf("Alligator", 228.0)], 0.0);
+let seqs = vec![
+    ExtantSequence::new("Chicken", Dna::new(b"ATGGGTCCCGCT")?),
+    ExtantSequence::new("Alligator", Dna::new(b"ATGGGTCCCGCA")?),
+];
+
+let model = SubstitutionModel::default_vertebrate_coding(); // HKY85 + discrete Gamma
+let mut locus = FelsensteinAsr::reconstruct_locus(&tree, &seqs, &model, "T_rex", "COL1A1", 66.0)?;
+
+// Anchor with fossil collagen peptide fragment
+let peptide = PeptideFragment::new(0, b"MGP", 0.98);
+PaleoproteomeTranslator::anchor_with_peptides(&mut locus, &[peptide], None)?;
+
+println!("Consensus Sequence: {}", locus.to_consensus_dna().as_str());
+println!("Anchored Accuracy: {:.1}% | Pure ASR Accuracy: {:.1}%",
+    locus.biomolecule_mean_confidence.unwrap_or(0.0) * 100.0,
+    locus.asr_mean_confidence.unwrap_or(0.0) * 100.0);
+```
+
 ### 5. In Silico Trypsin Digestion & Peptide Mass
 ```rust
 use scies_bio_th::proteomics::{digest, Enzyme};

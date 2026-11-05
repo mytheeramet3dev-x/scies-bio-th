@@ -88,8 +88,10 @@ fn run_mammoth_pleistocene_demo() -> Result<(), Box<dyn std::error::Error>> {
 
     let draft = engine.build_draft()?;
     println!(
-        "  • Expected Base Accuracy : {:.2}% (Mean Entropy: {:.4} bits)",
+        "  • Expected Base Accuracy : {:.2}% [Anchored: {:.2}%, Pure ASR: {:.2}%] (Mean Entropy: {:.4} bits)",
         draft.summary_metrics.overall_base_accuracy_expected * 100.0,
+        draft.summary_metrics.anchored_base_accuracy_expected * 100.0,
+        draft.summary_metrics.asr_base_accuracy_expected * 100.0,
         draft.summary_metrics.mean_shannon_entropy_bits
     );
     println!(
@@ -213,10 +215,16 @@ fn run_theropod_deep_time_demo() -> Result<(), Box<dyn std::error::Error>> {
 
     let draft = engine.build_draft()?;
     println!(
-        "  • Expected Base Accuracy : {:.2}% (Proteomic: {:.0}%, Pseudogene Repair: {:.0}%)",
+        "  • Expected Base Accuracy : {:.2}% [Anchored: {:.2}%, Pure ASR: {:.2}%]",
         draft.summary_metrics.overall_base_accuracy_expected * 100.0,
+        draft.summary_metrics.anchored_base_accuracy_expected * 100.0,
+        draft.summary_metrics.asr_base_accuracy_expected * 100.0,
+    );
+    println!(
+        "  • Provenance Breakdown   : Proteomics: {:.1}%, Pseudogene Repair: {:.1}%, Pure ASR: {:.1}%",
         draft.summary_metrics.fraction_anchored_by_proteomics * 100.0,
         draft.summary_metrics.fraction_pseudogene_repaired * 100.0,
+        draft.summary_metrics.fraction_inferred_by_asr * 100.0,
     );
     println!(
         "  • Enamel Dentition Prior : {:.1}% posterior selection probability",

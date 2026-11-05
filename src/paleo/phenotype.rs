@@ -304,9 +304,34 @@ impl PathwaySelectionProfile {
 
     /// Returns the selection priority multiplier for a given gene symbol based on its pathway posterior.
     pub fn gene_priority_weight(&self, gene_symbol: &str) -> f64 {
+        self.selection_intensity_omega(gene_symbol)
+    }
+
+    /// Computes the selection intensity multiplier $\omega$ ($dN/dS$ weighting factor) for a gene.
+    ///
+    /// Values range from $0.5$ (relaxed/pseudogenizing) through $1.0$ (neutral baseline) up to $1.5$ (accelerated/adaptive).
+    ///
+    /// > **Architectural Invariant**: Phenotypic evidence strictly modulates selection intensity ($\omega$)
+    /// > and locus presence/absence priors. It never directly overrides site-level nucleotide probabilities $P(A,C,G,T)$.
+    pub fn selection_intensity_omega(&self, gene_symbol: &str) -> f64 {
         match FunctionalPathway::from_gene_symbol(gene_symbol) {
             Some(pathway) => 0.5 + self.posterior_for(pathway),
             None => 1.0,
+        }
+    }
+
+    /// Evaluates the macro-evolutionary gene presence/absence prior $P(\text{Gene is functional} \mid \mathcal{E})$.
+    ///
+    /// For example:
+    /// - Toothed dentition fossil evidence produces high prior ($> 0.85$) for enamel genes (`ENAM`, `AMELX`).
+    /// - Arctic permafrost evidence produces high prior ($> 0.80$) for thermogenic adaptation (`UCP1`, `TRPM8`).
+    pub fn gene_presence_absence_prior(&self, gene_symbol: &str) -> f64 {
+        match FunctionalPathway::from_gene_symbol(gene_symbol) {
+            Some(pathway) => {
+                let post = self.posterior_for(pathway);
+                post.clamp(0.05, 0.95)
+            }
+            None => 0.50,
         }
     }
 }

@@ -328,6 +328,16 @@ pub struct ReconstructedLocus {
     pub high_uncertainty_regions: Vec<(usize, usize)>,
     /// Site-level provenance tracking.
     pub provenance: LocusProvenance,
+    /// Mean MAP confidence exclusively for pure ASR sites (unanchored).
+    pub asr_mean_confidence: Option<f64>,
+    /// Mean MAP confidence exclusively for biomolecule-anchored sites (aDNA or paleoproteomics).
+    pub biomolecule_mean_confidence: Option<f64>,
+    /// Number of sites inferred purely via phylogenetic ASR.
+    pub asr_site_count: usize,
+    /// Number of sites anchored by paleoproteomics or ancient DNA.
+    pub anchored_site_count: usize,
+    /// Number of sites recovered via pseudogene resurrection.
+    pub pseudogene_repaired_count: usize,
 }
 
 impl ReconstructedLocus {
@@ -346,19 +356,29 @@ impl ReconstructedLocus {
             mean_entropy_bits: 0.0,
             high_uncertainty_regions: Vec::new(),
             provenance,
+            asr_mean_confidence: None,
+            biomolecule_mean_confidence: None,
+            asr_site_count: 0,
+            anchored_site_count: 0,
+            pseudogene_repaired_count: 0,
         };
         locus.refresh_metrics();
         locus
     }
 
     /// Recomputes `mean_posterior_confidence`, `mean_entropy_bits`, `high_uncertainty_regions`,
-    /// and `provenance` fractions after any Bayesian update.
+    /// provenance-specific confidence breakdowns, and `provenance` fractions.
     pub fn refresh_metrics(&mut self) {
         self.provenance.recompute_fractions();
         if self.sites.is_empty() {
             self.mean_posterior_confidence = 0.0;
             self.mean_entropy_bits = 0.0;
             self.high_uncertainty_regions.clear();
+            self.asr_mean_confidence = None;
+            self.biomolecule_mean_confidence = None;
+            self.asr_site_count = 0;
+            self.anchored_site_count = 0;
+            self.pseudogene_repaired_count = 0;
             return;
         }
         let n = self.sites.len() as f64;
@@ -366,6 +386,35 @@ impl ReconstructedLocus {
         let sum_ent: f64 = self.sites.iter().map(|s| s.entropy_bits()).sum();
         self.mean_posterior_confidence = sum_conf / n;
         self.mean_entropy_bits = sum_ent / n;
+
+        let mut asr_sum = 0.0;
+        let mut asr_cnt = 0usize;
+        let mut bio_sum = 0.0;
+        let mut bio_cnt = 0usize;
+        let mut pseudo_cnt = 0usize;
+
+        for (i, site) in self.sites.iter().enumerate() {
+            let src = self.provenance.site_sources.get(i).copied().unwrap_or(SiteSource::AncestralReconstruction);
+            match src {
+                SiteSource::AncestralReconstruction => {
+                    asr_sum += site.max_prob();
+                    asr_cnt += 1;
+                }
+                SiteSource::Paleoproteomics | SiteSource::AncientDna => {
+                    bio_sum += site.max_prob();
+                    bio_cnt += 1;
+                }
+                SiteSource::PseudogeneRepair => {
+                    pseudo_cnt += 1;
+                }
+            }
+        }
+
+        self.asr_site_count = asr_cnt;
+        self.anchored_site_count = bio_cnt;
+        self.pseudogene_repaired_count = pseudo_cnt;
+        self.asr_mean_confidence = if asr_cnt > 0 { Some(asr_sum / asr_cnt as f64) } else { None };
+        self.biomolecule_mean_confidence = if bio_cnt > 0 { Some(bio_sum / bio_cnt as f64) } else { None };
 
         self.high_uncertainty_regions.clear();
         let mut in_region = false;
