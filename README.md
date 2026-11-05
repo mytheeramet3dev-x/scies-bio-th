@@ -42,6 +42,7 @@ scies_bio_th::
 ├── safety         — [feature = "safety"] p53 tumor suppressor DNA damage checkpoints & oncogenic lockout
 ├── aging          — [feature = "aging"] Longevity engineering, Telomeres, Telomerase, Horvath Clock, OSK reprogramming, Immune rejuvenation
 ├── imaging        — [feature = "imaging"] Cell segmentation and bioimaging metadata primitives
+├── paleo          — [feature = "paleo"] Paleo-genomic & paleoproteomic reconstruction, ASR Felsenstein pruning, Briggs aDNA, pseudogene resurrection, chassis editing
 └── ivg            — [feature = "experimental"] In Vitro Gametogenesis, SCNT cloning, Ovarian organoid folliculogenesis
 ```
 
@@ -173,13 +174,56 @@ let coupling = propagate_cross_organ_coupling(&mut atlas, &mut circuits);
 println!("Systemic SASP Burden: {:.2}", coupling.systemic_sasp_burden);
 ```
 
+### 5. Paleo-Genomic Reconstruction & De-Extinction Chassis Editing
+```rust
+use scies_bio_th::paleo::*;
+use scies_bio_th::phylo::PhyloNode;
+use scies_bio_th::seq::Dna;
+
+// 1. Ancestral Sequence Reconstruction (ASR) via Felsenstein pruning
+let birds = PhyloNode::internal(
+    vec![PhyloNode::leaf("Gallus_gallus", 68.0), PhyloNode::leaf("Falco_peregrinus", 68.0)],
+    160.0,
+);
+let tree = PhyloNode::internal(vec![birds, PhyloNode::leaf("Alligator_mississippiensis", 228.0)], 0.0);
+let seqs = vec![
+    ExtantSequence::new("Gallus_gallus", Dna::new(b"GGTCCCCCT")?),
+    ExtantSequence::new("Falco_peregrinus", Dna::new(b"GGACCCCCT")?),
+    ExtantSequence::new("Alligator_mississippiensis", Dna::new(b"GGGCCTCCA")?),
+];
+
+let mut locus = FelsensteinAsr::reconstruct_locus(
+    &tree, &seqs, &SubstitutionModel::default_vertebrate_coding(), "Tyrannosaurus rex", "COL1A1", 66.0,
+)?;
+
+// 2. Anchor with fossil collagen peptide fragment (Gly-Hyp-Ala)
+let peptide = PeptideFragment::new(0, b"GOA", 0.98);
+PaleoproteomeTranslator::anchor_with_peptides(&mut locus, &[peptide], None)?;
+
+// 3. Synthesize chassis edit plan against modern chicken
+let mut engine = PaleoReconstructionEngine::new("Tyrannosaurus rex", "Gallus gallus");
+engine.add_reconstructed_locus(locus, Dna::new(b"GGTCCCCCT")?)?;
+let draft = engine.build_draft()?;
+println!("Target Chassis Edits: {}", draft.chassis_edit_plan.len());
+```
+
 ---
 
 ## 🧪 Testing & Verification
 
-Run the full test suite (188+ tests passing across all features):
+Run the full test suite (194+ tests passing across all features):
 ```bash
 cargo test --all-features
+```
+
+Run paleo-genomic reconstruction test suite:
+```bash
+cargo test --features paleo
+```
+
+Run paleo de-extinction demonstration:
+```bash
+cargo run --release --example paleo_reconstruction_demo --features paleo
 ```
 
 Run longevity & aging test suite:
