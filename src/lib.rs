@@ -56,6 +56,9 @@ pub mod singlecell;
 #[cfg(feature = "pharma")]
 pub mod pharma;
 
+#[cfg(feature = "paleo")]
+pub mod paleo;
+
 #[cfg(feature = "experimental")]
 pub mod ivg;
 

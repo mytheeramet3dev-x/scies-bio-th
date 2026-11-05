@@ -27,6 +27,7 @@ singlecell = ["stats", "network", "multiomics"]
 pharma = ["stats"]
 aging = ["docking", "epigenome", "safety", "regulatory", "singlecell", "pharma", "serde"]
 imaging = []
+paleo = []
 experimental = []
 full = [
   "structure",
@@ -41,7 +42,12 @@ full = [
   "pharma",
   "aging",
   "imaging",
+  "paleo",
 ]
+
+[[example]]
+name = "paleo_reconstruction_demo"
+required-features = ["paleo"]
 
 [[example]]
 name = "design_from_real_genome"
